@@ -2,7 +2,7 @@
 
 A mindful match-3 puzzle game designed for relaxation, not competition.
 
-**[Play Now](https://g-shudy.github.io/zen-match)** (coming soon)
+**[Play Now](https://zen.ghsj.me)**
 
 ## Philosophy
 
