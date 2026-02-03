@@ -48,25 +48,37 @@ Read the full [Design Philosophy](docs/zen-match-design-philosophy.md).
 
 ## Tech
 
-- Pure vanilla JavaScript - no frameworks, no dependencies
-- Single HTML file - easy to host anywhere
+- TypeScript + esbuild (no framework)
+- Static assets served from `index.html` + `dist/` bundle
 - Works offline after first load
+
+## Build (TypeScript + esbuild)
+
+The game is now bundled from TypeScript with a minimal esbuild script. Output goes to `dist/`.
+
+```bash
+npm install
+npm run build
+```
 
 ## Local Development
 
 ```bash
-# Clone the repo
-git clone https://github.com/g-shudy/zen-match.git
-cd zen-match
+# Install deps and build on change
+npm install
+npm run dev
 
-# Start a local server (Python)
+# Serve the repo root (Python)
 python -m http.server 8080
-
-# Or use Node
-npx serve
 ```
 
 Then open http://localhost:8080
+
+## Tests
+
+```bash
+npm run test
+```
 
 ## Documentation
 
