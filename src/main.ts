@@ -6,7 +6,8 @@ import {
   type Frame,
   type Pos,
   type Effect,
-  type RemovalAnim
+  type RemovalAnim,
+  type RemovalSubStep
 } from './engine/index';
 
 const ROWS = 8;
@@ -38,9 +39,7 @@ const MAX_HISTORY = 20;
 const boardEl = document.getElementById('board') as HTMLDivElement;
 const avgScoreEl = document.getElementById('avgScore') as HTMLSpanElement;
 const scoreHistoryEl = document.getElementById('scoreHistory') as HTMLDivElement;
-const cascadeEl = document.getElementById('cascade') as HTMLDivElement;
-const comboEl = document.getElementById('combo') as HTMLDivElement;
-const chainEl = document.getElementById('chain') as HTMLDivElement;
+const comboCounterEl = document.getElementById('comboCounter') as HTMLDivElement;
 const shuffleNotice = document.getElementById('shuffleNotice') as HTMLDivElement;
 const distHistoryEl = document.getElementById('distHistory') as HTMLDivElement;
 const avgSparklineEl = document.getElementById('avgSparkline') as HTMLCanvasElement;
@@ -125,6 +124,12 @@ function renderBoard(board: Board): void {
 
       if (selected && selected.r === r && selected.c === c) {
         gemEl.classList.add('selected');
+      } else if (selected) {
+        const dr = Math.abs(selected.r - r);
+        const dc = Math.abs(selected.c - c);
+        if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
+          gemEl.classList.add('swap-target');
+        }
       }
     }
   }
@@ -231,45 +236,56 @@ function recordMove(board: Board, points: number): void {
   renderStats();
 }
 
-function showCascade(count: number): void {
-  if (count > 1) {
-    cascadeEl.textContent = `${count}x Cascade!`;
-    cascadeEl.classList.add('show');
+function showComboCounter(combo: number): void {
+  if (combo >= 2) {
+    comboCounterEl.textContent = `Combo x${combo}`;
+    comboCounterEl.className = 'combo-counter show';
+    if (combo >= 5) {
+      comboCounterEl.classList.add('epic');
+      boardEl.classList.add('combo-flash');
+      setTimeout(() => boardEl.classList.remove('combo-flash'), 600);
+    } else if (combo >= 4) {
+      comboCounterEl.classList.add('hot');
+    } else if (combo >= 3) {
+      comboCounterEl.classList.add('warm');
+    }
   }
 }
 
-function showCombo(count: number): void {
-  const texts = [
-    null,
-    null,
-    { text: 'Good!', class: 'good' },
-    { text: 'Great!', class: 'great' },
-    { text: 'Amazing!', class: 'amazing' },
-    { text: 'Incredible!', class: 'incredible' }
-  ];
-
-  const combo = texts[Math.min(count, texts.length - 1)];
-  if (combo) {
-    comboEl.textContent = combo.text;
-    comboEl.className = `combo-text show ${combo.class}`;
-  }
-}
-
-function showChainReaction(count: number): void {
-  if (count > 0) {
-    chainEl.textContent = `Chain x${count}!`;
-    chainEl.classList.add('show');
-  }
-}
-
-function showScorePopup(points: number, isBonus = false, isChain = false): void {
+function showScorePopup(points: number, combo: number, positions: Pos[], isBonus = false): void {
   const popup = document.createElement('div');
-  popup.className = `score-popup${isChain ? ' chain' : (isBonus ? ' bonus' : '')}`;
-  popup.textContent = `+${points}`;
-  popup.style.left = '50%';
-  popup.style.top = '45%';
-  popup.style.transform = 'translateX(-50%)';
-  document.body.appendChild(popup);
+  popup.className = `score-popup${isBonus ? ' bonus' : ''}`;
+
+  const text = combo >= 2 ? `+${formatNumber(points)} x${combo}` : `+${formatNumber(points)}`;
+  popup.textContent = text;
+
+  // Scale font by point value
+  const scale = Math.min(1 + Math.log10(Math.max(points, 10)) * 0.3, 2.5);
+  popup.style.fontSize = `${scale}rem`;
+
+  // Position at centroid of matched positions
+  if (positions.length > 0) {
+    const centroidR = positions.reduce((sum, p) => sum + p.r, 0) / positions.length;
+    const centroidC = positions.reduce((sum, p) => sum + p.c, 0) / positions.length;
+
+    const idx = Math.round(centroidR) * COLS + Math.round(centroidC);
+    const cell = cells[Math.min(idx, cells.length - 1)];
+    if (cell) {
+      const rect = cell.getBoundingClientRect();
+      const boardRect = boardEl.getBoundingClientRect();
+      popup.style.left = `${rect.left - boardRect.left + rect.width / 2}px`;
+      popup.style.top = `${rect.top - boardRect.top}px`;
+      // Alternate drift direction based on combo count
+      if (combo % 2 === 0) {
+        popup.style.setProperty('--drift', '-30px');
+      }
+    }
+  } else {
+    popup.style.left = '50%';
+    popup.style.top = '45%';
+  }
+
+  boardEl.appendChild(popup);
   setTimeout(() => popup.remove(), 1000);
 }
 
@@ -328,11 +344,104 @@ function applyRemovalAnimations(positions: Pos[], animations: Record<string, Rem
   }
 }
 
+async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>, token: number): Promise<void> {
+  if (!frame.moves || frame.moves.length === 0) {
+    renderBoard(frame.board);
+    await sleep(500);
+    return;
+  }
+
+  // FLIP technique: record old positions, render new, animate from old -> new
+  const oldRects = new Map<number, DOMRect>();
+  for (const move of frame.moves) {
+    const idx = move.from.r * COLS + move.from.c;
+    const cell = cells[idx];
+    if (cell) oldRects.set(idx, cell.getBoundingClientRect());
+  }
+
+  renderBoard(frame.board);
+
+  // Animate gems from old position to new
+  for (const move of frame.moves) {
+    const newIdx = move.to.r * COLS + move.to.c;
+    const oldIdx = move.from.r * COLS + move.from.c;
+    const gemEl = gems[newIdx];
+    const oldRect = oldRects.get(oldIdx);
+    if (!gemEl || !oldRect) continue;
+
+    const newRect = cells[newIdx].getBoundingClientRect();
+    const dx = oldRect.left - newRect.left;
+    const dy = oldRect.top - newRect.top;
+
+    if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+      gemEl.style.transform = `translate(${dx}px, ${dy}px)`;
+      gemEl.style.transition = 'none';
+    }
+  }
+
+  // Force layout
+  void boardEl.offsetHeight;
+
+  // Animate to final position with staggered timing
+  for (const move of frame.moves) {
+    const newIdx = move.to.r * COLS + move.to.c;
+    const gemEl = gems[newIdx];
+    if (!gemEl) continue;
+
+    const stagger = Math.random() * 100;
+    gemEl.style.transition = `transform 600ms cubic-bezier(0.34, 1.56, 0.64, 1) ${stagger}ms`;
+    gemEl.style.transform = '';
+  }
+
+  await sleep(700);
+
+  // Cleanup inline styles
+  for (const move of frame.moves) {
+    const newIdx = move.to.r * COLS + move.to.c;
+    const gemEl = gems[newIdx];
+    if (gemEl) {
+      gemEl.style.transition = '';
+      gemEl.style.transform = '';
+    }
+  }
+}
+
+async function playSubSteps(subSteps: RemovalSubStep[], token: number): Promise<void> {
+  for (const step of subSteps) {
+    if (token !== runToken) return;
+
+    // Show activation pulse on trigger gem
+    const triggerIdx = step.triggerPos.r * COLS + step.triggerPos.c;
+    const triggerGem = gems[triggerIdx];
+    if (triggerGem) triggerGem.classList.add('activating');
+    await sleep(150);
+
+    // Show the effect
+    for (const pos of step.positions) {
+      const idx = pos.r * COLS + pos.c;
+      const gemEl = gems[idx];
+      const key = `${pos.r},${pos.c}`;
+      if (gemEl) gemEl.classList.add(step.animations[key] || 'matched');
+    }
+    step.effects.forEach(effect => {
+      if (effect.kind === 'explosion') {
+        showExplosionEffect(effect.r, effect.c);
+      } else {
+        showLineEffect(effect);
+      }
+    });
+    await sleep(300);
+
+    if (triggerGem) triggerGem.classList.remove('activating');
+  }
+}
+
 async function playFrames(frames: Frame[], token: number): Promise<void> {
   let sawShuffle = false;
 
-  for (const frame of frames) {
+  for (let i = 0; i < frames.length; i++) {
     if (token !== runToken) return;
+    const frame = frames[i];
 
     switch (frame.kind) {
       case 'swap':
@@ -348,26 +457,50 @@ async function playFrames(frames: Frame[], token: number): Promise<void> {
         await sleep(400);
         break;
       case 'remove':
-        showCascade(frame.score.cascade);
-        showCombo(frame.score.cascade);
-        showChainReaction(frame.score.chain);
-        showScorePopup(frame.score.points, frame.score.isBonus, frame.score.chain > 0);
+        showComboCounter(frame.score.combo);
+        showScorePopup(frame.score.points, frame.score.combo, frame.positions, frame.score.isBonus);
         pendingPoints += frame.score.points;
         liveUpdateStats(currentBoard);
-        applyRemovalAnimations(frame.positions, frame.animations);
-        frame.effects.forEach(effect => {
-          if (effect.kind === 'explosion') {
-            showExplosionEffect(effect.r, effect.c);
-          } else {
-            showLineEffect(effect);
-          }
-        });
-        await sleep(400);
+
+        // Phase 5B: If sub-steps exist, play them sequentially
+        if (frame.subSteps && frame.subSteps.length > 0) {
+          // Initial match removal
+          applyRemovalAnimations(frame.positions, frame.animations);
+          await sleep(300);
+          // Then play special activation sequences
+          await playSubSteps(frame.subSteps, token);
+        } else {
+          applyRemovalAnimations(frame.positions, frame.animations);
+          frame.effects.forEach(effect => {
+            if (effect.kind === 'explosion') {
+              showExplosionEffect(effect.r, effect.c);
+            } else {
+              showLineEffect(effect);
+            }
+          });
+          await sleep(400);
+        }
         break;
-      case 'board':
+      case 'board': {
         renderBoard(frame.board);
-        await sleep(100);
+        // Phase 5E: Longer pause and animation when new specials appear
+        if (frame.newSpecials && frame.newSpecials.length > 0) {
+          for (const pos of frame.newSpecials) {
+            const idx = pos.r * COLS + pos.c;
+            const gemEl = gems[idx];
+            if (gemEl) gemEl.classList.add('just-created');
+          }
+          await sleep(300);
+          for (const pos of frame.newSpecials) {
+            const idx = pos.r * COLS + pos.c;
+            const gemEl = gems[idx];
+            if (gemEl) gemEl.classList.remove('just-created');
+          }
+        } else {
+          await sleep(100);
+        }
         break;
+      }
       case 'drop':
         renderBoard(frame.board);
         await sleep(250);
@@ -376,13 +509,27 @@ async function playFrames(frames: Frame[], token: number): Promise<void> {
         renderBoard(frame.board);
         await sleep(200);
         break;
+      case 'preview':
+        // Phase 5A: Trembling preview of pending matches
+        renderBoard(frame.board);
+        for (const pos of frame.pendingPositions) {
+          const idx = pos.r * COLS + pos.c;
+          const gemEl = gems[idx];
+          if (gemEl) gemEl.classList.add('pending-match');
+        }
+        await sleep(400);
+        for (const pos of frame.pendingPositions) {
+          const idx = pos.r * COLS + pos.c;
+          const gemEl = gems[idx];
+          if (gemEl) gemEl.classList.remove('pending-match');
+        }
+        break;
       case 'shuffle':
         if (!sawShuffle) {
           shuffleNotice.classList.add('show');
           sawShuffle = true;
         }
-        renderBoard(frame.board);
-        await sleep(500);
+        await animateShuffle(frame, token);
         break;
       default:
         break;
@@ -412,9 +559,7 @@ function resetStats(): void {
   distHistory = [];
   scoreHistory = [];
   avgHistory = [];
-  cascadeEl.classList.remove('show');
-  comboEl.classList.remove('show');
-  chainEl.classList.remove('show');
+  comboCounterEl.classList.remove('show');
 }
 
 function startNewGame(): void {
@@ -446,6 +591,7 @@ async function trySwap(pos1: Pos, pos2: Pos): Promise<void> {
   if (isProcessing) return;
 
   isProcessing = true;
+  boardEl.classList.add('processing');
   pendingPoints = 0;
   const localToken = ++runToken;
 
@@ -455,13 +601,12 @@ async function trySwap(pos1: Pos, pos2: Pos): Promise<void> {
   if (localToken !== runToken) return;
 
   isProcessing = false;
+  boardEl.classList.remove('processing');
   recordMove(engine.state.board, result.pointsEarned);
   pendingPoints = 0;
 
   setTimeout(() => {
-    cascadeEl.classList.remove('show');
-    comboEl.classList.remove('show');
-    chainEl.classList.remove('show');
+    comboCounterEl.classList.remove('show');
   }, 500);
 }
 
@@ -472,9 +617,10 @@ function isAdjacent(a: Pos, b: Pos): boolean {
 }
 
 let pointerId: number | null = null;
-let pointerStart: { pos: Pos; x: number; y: number } | null = null;
+let pointerStart: { pos: Pos; x: number; y: number; time: number } | null = null;
 let dragTriggered = false;
-const dragThreshold = 12;
+const dragThreshold = 16;
+const dragTimeGate = 120;
 
 boardEl.addEventListener('pointerdown', (event: PointerEvent) => {
   if (isProcessing) return;
@@ -486,14 +632,9 @@ boardEl.addEventListener('pointerdown', (event: PointerEvent) => {
   const r = Number(cell.dataset.row);
   const c = Number(cell.dataset.col);
   pointerId = event.pointerId;
-  pointerStart = { pos: { r, c }, x: event.clientX, y: event.clientY };
+  pointerStart = { pos: { r, c }, x: event.clientX, y: event.clientY, time: performance.now() };
   dragTriggered = false;
   boardEl.setPointerCapture(event.pointerId);
-
-  if (!selected) {
-    selected = { r, c };
-    renderBoard(currentBoard);
-  }
 });
 
 boardEl.addEventListener('pointermove', (event: PointerEvent) => {
@@ -503,8 +644,9 @@ boardEl.addEventListener('pointermove', (event: PointerEvent) => {
   const dx = event.clientX - pointerStart.x;
   const dy = event.clientY - pointerStart.y;
   const distance = Math.hypot(dx, dy);
+  const elapsed = performance.now() - pointerStart.time;
 
-  if (distance < dragThreshold || dragTriggered) return;
+  if (distance < dragThreshold || elapsed < dragTimeGate || dragTriggered) return;
 
   const horizontal = Math.abs(dx) > Math.abs(dy);
   const start = pointerStart.pos;
@@ -534,22 +676,21 @@ boardEl.addEventListener('pointerup', (event: PointerEvent) => {
     return;
   }
 
-  const start = pointerStart.pos;
-  pointerStart = null;
-
-  if (!selected) {
-    selected = start;
-    renderBoard(currentBoard);
+  if (isProcessing) {
+    pointerStart = null;
     return;
   }
 
-  if (selected.r === start.r && selected.c === start.c) {
+  const start = pointerStart.pos;
+  pointerStart = null;
+
+  if (selected && selected.r === start.r && selected.c === start.c) {
     selected = null;
     renderBoard(currentBoard);
     return;
   }
 
-  if (isAdjacent(selected, start)) {
+  if (selected && isAdjacent(selected, start)) {
     const from = selected;
     selected = null;
     renderBoard(currentBoard);

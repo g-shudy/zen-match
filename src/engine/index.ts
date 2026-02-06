@@ -61,22 +61,35 @@ export type Effect =
   | { kind: 'explosion'; r: number; c: number }
   | { kind: 'line'; direction: 'horizontal' | 'vertical'; row?: number; col?: number };
 
+export interface ScoreBreakdown {
+  base: number;
+  matchBonus: number;
+  comboMultiplier: number;
+}
+
 export interface ScoreEvent {
   points: number;
-  cascade: number;
-  chain: number;
-  matchBonus: number;
+  combo: number;
+  breakdown: ScoreBreakdown;
   isBonus: boolean;
+}
+
+export interface RemovalSubStep {
+  triggerPos: Pos;
+  positions: Pos[];
+  animations: Record<string, RemovalAnim>;
+  effects: Effect[];
 }
 
 export type Frame =
   | { kind: 'swap'; board: Board }
   | { kind: 'invalid'; positions: Pos[] }
-  | { kind: 'remove'; positions: Pos[]; animations: Record<string, RemovalAnim>; effects: Effect[]; score: ScoreEvent }
-  | { kind: 'board'; board: Board }
+  | { kind: 'remove'; positions: Pos[]; animations: Record<string, RemovalAnim>; effects: Effect[]; score: ScoreEvent; subSteps?: RemovalSubStep[] }
+  | { kind: 'board'; board: Board; newSpecials?: Pos[] }
   | { kind: 'drop'; board: Board }
   | { kind: 'fill'; board: Board }
-  | { kind: 'shuffle'; board: Board; attempt: number };
+  | { kind: 'preview'; board: Board; pendingPositions: Pos[] }
+  | { kind: 'shuffle'; board: Board; attempt: number; moves?: Array<{ from: Pos; to: Pos; type: number }> };
 
 export interface ResolveResult {
   frames: Frame[];
@@ -212,6 +225,16 @@ export class Engine {
     const gem2IsSpecial = isSpecial(gem2);
     const bothAreSpecial = gem1IsSpecial && gem2IsSpecial;
 
+    // Design decision: When two specials are swapped, they always interact with
+    // a combined effect rather than requiring a match. This follows the Candy Crush
+    // convention where special+special swaps are powerful combo moves that reward
+    // players for setting them up adjacently. The interaction rules:
+    // - Rainbow+Rainbow: clears both colors
+    // - Rainbow+Bomb: all gems of that color explode (3x3 each)
+    // - Rainbow+Line: all gems of that color become line clears
+    // - Bomb+Bomb: 5x5 explosion
+    // - Line+Line: cross clear (full row + column)
+    // - Bomb+Line: 3-wide line clear
     if (bothAreSpecial) {
       const specials = [gem1Special, gem2Special];
       const isRainbowCombo = specials.includes(SPECIAL.RAINBOW);
@@ -416,9 +439,8 @@ export class Engine {
         effects,
         score: {
           points,
-          cascade: 1,
-          chain: chainReactionCount,
-          matchBonus: 0,
+          combo: 1,
+          breakdown: { base: points, matchBonus: 0, comboMultiplier: 1 },
           isBonus: true
         }
       });
@@ -436,21 +458,25 @@ export class Engine {
       pointsEarned += cascadeResult.points;
 
       if (!hasValidMoves(board, rows, cols)) {
-        const shuffleFrames = shuffleBoard(this.state, 0);
-        frames.push(...shuffleFrames);
+        const shuffleResult = shuffleBoard(this.state, 0);
+        frames.push(...shuffleResult.frames);
+        pointsEarned += shuffleResult.points;
       }
     } else if (gem1Special === SPECIAL.RAINBOW || gem2Special === SPECIAL.RAINBOW) {
       const gem1IsRainbow = gem1Special === SPECIAL.RAINBOW;
       const targetType = gem1IsRainbow ? gem2?.type : gem1?.type;
+      const rainbowType = gem1IsRainbow ? gem1?.type : gem2?.type;
       const rainbowPos = gem1IsRainbow ? pos2 : pos1;
 
       const toRemove = new Set<string>();
       const animationClasses = new Map<string, RemovalAnim>();
       const effects: Effect[] = [];
 
+      // Phase 3D: Clear BOTH the rainbow's hidden color AND the swapped gem's color
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-          if (board[r][c]?.type === targetType) {
+          const cellType = board[r][c]?.type;
+          if (cellType === targetType || cellType === rainbowType) {
             const k = keyFor(r, c);
             toRemove.add(k);
             animationClasses.set(k, 'rainbow-cleared');
@@ -485,9 +511,8 @@ export class Engine {
         effects,
         score: {
           points,
-          cascade: 1,
-          chain: chainCount,
-          matchBonus: 0,
+          combo: 1,
+          breakdown: { base: points, matchBonus: 0, comboMultiplier: 1 },
           isBonus: true
         }
       });
@@ -505,7 +530,9 @@ export class Engine {
       pointsEarned += cascadeResult.points;
 
       if (!hasValidMoves(board, rows, cols)) {
-        frames.push(...shuffleBoard(this.state, 0));
+        const sr = shuffleBoard(this.state, 0);
+        frames.push(...sr.frames);
+        pointsEarned += sr.points;
       }
     } else if (gem1IsSpecial || gem2IsSpecial) {
       const matches = findMatches(board, rows, cols);
@@ -515,7 +542,9 @@ export class Engine {
         moveValid = cascadeResult.points > 0;
 
         if (!hasValidMoves(board, rows, cols)) {
-          frames.push(...shuffleBoard(this.state, 0));
+          const sr = shuffleBoard(this.state, 0);
+          frames.push(...sr.frames);
+          pointsEarned += sr.points;
         }
       } else {
         frames.push({ kind: 'invalid', positions: [pos1, pos2] });
@@ -534,7 +563,9 @@ export class Engine {
         moveValid = cascadeResult.points > 0;
 
         if (!hasValidMoves(board, rows, cols)) {
-          frames.push(...shuffleBoard(this.state, 0));
+          const sr = shuffleBoard(this.state, 0);
+          frames.push(...sr.frames);
+          pointsEarned += sr.points;
         }
       }
     }
@@ -690,9 +721,10 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
       }
     }
 
+    // Phase 3A: Always use actual group cell count for effectiveLen
     matches.push({
       positions: match,
-      effectiveLen: hasComplex ? match.length : data.matchLen,
+      effectiveLen: match.length,
       isComplex: hasComplex,
       direction: hDir && vDir ? 'both' : (hDir ? 'horizontal' : 'vertical'),
       type: data.type
@@ -710,12 +742,13 @@ function activateSpecialsInRemovalSet(
   cols: number,
   effects: Effect[],
   processed = new Set<string>()
-): { bonusPoints: number; chainCount: number } {
+): { bonusPoints: number; chainCount: number; subSteps: RemovalSubStep[] } {
   let bonusPoints = 0;
   let chainCount = 0;
   let newSpecialsFound = true;
   let iterations = 0;
   const maxIterations = 20;
+  const subSteps: RemovalSubStep[] = [];
 
   while (newSpecialsFound && iterations < maxIterations) {
     newSpecialsFound = false;
@@ -730,8 +763,13 @@ function activateSpecialsInRemovalSet(
       if (processed.has(key)) continue;
       processed.add(key);
 
+      const stepPositions: Pos[] = [];
+      const stepAnimations: Record<string, RemovalAnim> = {};
+      const stepEffects: Effect[] = [];
+
       if (gem.special === SPECIAL.BOMB) {
         chainCount++;
+        stepEffects.push({ kind: 'explosion', r, c });
         effects.push({ kind: 'explosion', r, c });
 
         for (let dr = -1; dr <= 1; dr++) {
@@ -743,6 +781,8 @@ function activateSpecialsInRemovalSet(
               if (!toRemove.has(newKey)) {
                 toRemove.add(newKey);
                 animationClasses.set(newKey, 'exploding');
+                stepPositions.push({ r: nr, c: nc });
+                stepAnimations[newKey] = 'exploding';
                 newSpecialsFound = true;
               }
             }
@@ -760,9 +800,12 @@ function activateSpecialsInRemovalSet(
             if (!toRemove.has(newKey)) {
               toRemove.add(newKey);
               animationClasses.set(newKey, 'line-cleared');
+              stepPositions.push({ r, c: i });
+              stepAnimations[newKey] = 'line-cleared';
               newSpecialsFound = true;
             }
           }
+          stepEffects.push({ kind: 'line', direction: 'horizontal', row: r });
           effects.push({ kind: 'line', direction: 'horizontal', row: r });
         }
 
@@ -772,9 +815,12 @@ function activateSpecialsInRemovalSet(
             if (!toRemove.has(newKey)) {
               toRemove.add(newKey);
               animationClasses.set(newKey, 'line-cleared');
+              stepPositions.push({ r: i, c });
+              stepAnimations[newKey] = 'line-cleared';
               newSpecialsFound = true;
             }
           }
+          stepEffects.push({ kind: 'line', direction: 'vertical', col: c });
           effects.push({ kind: 'line', direction: 'vertical', col: c });
         }
 
@@ -791,6 +837,8 @@ function activateSpecialsInRemovalSet(
               if (!toRemove.has(newKey)) {
                 toRemove.add(newKey);
                 animationClasses.set(newKey, 'rainbow-cleared');
+                stepPositions.push({ r: i, c: j });
+                stepAnimations[newKey] = 'rainbow-cleared';
                 newSpecialsFound = true;
               }
             }
@@ -800,14 +848,24 @@ function activateSpecialsInRemovalSet(
         animationClasses.set(key, 'rainbow-cleared');
         bonusPoints += 500;
       }
+
+      if (stepPositions.length > 0) {
+        subSteps.push({
+          triggerPos: { r, c },
+          positions: stepPositions,
+          animations: stepAnimations,
+          effects: stepEffects
+        });
+      }
     }
   }
 
-  return { bonusPoints, chainCount };
+  return { bonusPoints, chainCount, subSteps };
 }
 
-function findBestSpecialPosition(match: MatchGroup, lastSwapPos: EngineState['lastSwapPos']): Pos {
-  if (lastSwapPos) {
+function findBestSpecialPosition(match: MatchGroup, lastSwapPos: EngineState['lastSwapPos'], comboCount = 1): Pos {
+  // Phase 3F: During cascades (combo > 1), use geometric center instead of swap position
+  if (comboCount <= 1 && lastSwapPos) {
     for (const pos of match.positions) {
       if ((pos.r === lastSwapPos.r1 && pos.c === lastSwapPos.c1) ||
         (pos.r === lastSwapPos.r2 && pos.c === lastSwapPos.c2)) {
@@ -815,17 +873,31 @@ function findBestSpecialPosition(match: MatchGroup, lastSwapPos: EngineState['la
       }
     }
   }
-  return match.positions[Math.floor(match.positions.length / 2)];
+
+  // Find geometric center and pick closest match position to it
+  const centroidR = match.positions.reduce((sum, p) => sum + p.r, 0) / match.positions.length;
+  const centroidC = match.positions.reduce((sum, p) => sum + p.c, 0) / match.positions.length;
+
+  let bestPos = match.positions[0];
+  let bestDist = Infinity;
+  for (const pos of match.positions) {
+    const dist = Math.hypot(pos.r - centroidR, pos.c - centroidC);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestPos = pos;
+    }
+  }
+  return bestPos;
 }
 
 function processMatches(state: EngineState, frames: Frame[]): { points: number } {
   const { rows, cols, board } = state;
   let matches = findMatches(board, rows, cols);
   let totalPoints = 0;
-  let cascadeCount = 0;
+  let comboCount = 0;
 
   while (matches.length > 0) {
-    cascadeCount++;
+    comboCount++;
 
     const toRemove = new Set<string>();
     const specials: Array<{ pos: Pos; type: number; special: Special; direction?: Direction }> = [];
@@ -837,17 +909,23 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
       const len = match.effectiveLen || match.positions.length;
       const type = match.type;
 
-      if (match.isComplex || len >= 6) {
-        const pos = findBestSpecialPosition(match, state.lastSwapPos);
+      // Phase 3B: T/L shapes (isComplex) -> BOMB; only len >= 6 -> RAINBOW
+      if (len >= 6) {
+        const pos = findBestSpecialPosition(match, state.lastSwapPos, comboCount);
         specials.push({ pos, type, special: SPECIAL.RAINBOW });
         matchBonus += 200;
+      } else if (match.isComplex && len >= 5) {
+        const pos = findBestSpecialPosition(match, state.lastSwapPos, comboCount);
+        specials.push({ pos, type, special: SPECIAL.BOMB });
+        matchBonus += 150;
       } else if (len === 5) {
-        const pos = findBestSpecialPosition(match, state.lastSwapPos);
-        const clearDir = match.direction === 'horizontal' ? 'vertical' : 'horizontal';
+        const pos = findBestSpecialPosition(match, state.lastSwapPos, comboCount);
+        // Phase 3C: Line direction same as match (not perpendicular)
+        const clearDir = match.direction === 'horizontal' ? 'horizontal' : 'vertical';
         specials.push({ pos, type, special: SPECIAL.LINE, direction: clearDir });
         matchBonus += 100;
       } else if (len === 4) {
-        const pos = findBestSpecialPosition(match, state.lastSwapPos);
+        const pos = findBestSpecialPosition(match, state.lastSwapPos, comboCount);
         specials.push({ pos, type, special: SPECIAL.BOMB });
         matchBonus += 50;
       }
@@ -861,7 +939,7 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
       }
     }
 
-    const { bonusPoints, chainCount } = activateSpecialsInRemovalSet(
+    const { bonusPoints, chainCount, subSteps } = activateSpecialsInRemovalSet(
       board,
       toRemove,
       animationClasses,
@@ -873,9 +951,8 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
     matchBonus += bonusPoints;
 
     const basePoints = toRemove.size * 10;
-    const cascadeMultiplier = cascadeCount;
-    const chainMultiplier = 1 + (chainCount * 0.5);
-    const points = Math.floor((basePoints + matchBonus) * cascadeMultiplier * chainMultiplier);
+    const comboMultiplier = 1 + (comboCount - 1) * 0.5;
+    const points = Math.floor((basePoints + matchBonus) * comboMultiplier);
     totalPoints += points;
 
     frames.push({
@@ -885,11 +962,11 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
       effects,
       score: {
         points,
-        cascade: cascadeCount,
-        chain: chainCount,
-        matchBonus,
+        combo: comboCount,
+        breakdown: { base: basePoints, matchBonus, comboMultiplier },
         isBonus: matchBonus > 50
-      }
+      },
+      subSteps: subSteps.length > 0 ? subSteps : undefined
     });
 
     removePositions(board, toRemove);
@@ -898,6 +975,7 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
     specials.sort((a, b) => (specialPriority[b.special ?? ''] ?? 0) - (specialPriority[a.special ?? ''] ?? 0));
 
     const usedPositions = new Set<string>();
+    const newSpecialPositions: Pos[] = [];
     for (const sp of specials) {
       const posKey = keyFor(sp.pos.r, sp.pos.c);
       if (usedPositions.has(posKey)) continue;
@@ -908,10 +986,11 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
           direction: sp.direction ?? null
         };
         usedPositions.add(posKey);
+        newSpecialPositions.push(sp.pos);
       }
     }
 
-    frames.push({ kind: 'board', board: cloneBoard(board) });
+    frames.push({ kind: 'board', board: cloneBoard(board), newSpecials: newSpecialPositions.length > 0 ? newSpecialPositions : undefined });
 
     const dropped = dropGems(board, rows, cols);
     if (dropped) frames.push({ kind: 'drop', board: cloneBoard(board) });
@@ -920,6 +999,17 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
     if (filled) frames.push({ kind: 'fill', board: cloneBoard(board) });
 
     matches = findMatches(board, rows, cols);
+
+    // Phase 2B: Emit preview frame when more matches are pending after fill
+    if (matches.length > 0) {
+      const pendingPositions: Pos[] = [];
+      for (const match of matches) {
+        for (const pos of match.positions) {
+          pendingPositions.push(pos);
+        }
+      }
+      frames.push({ kind: 'preview', board: cloneBoard(board), pendingPositions });
+    }
   }
 
   return { points: totalPoints };
@@ -1011,10 +1101,20 @@ function isMoveValid(board: Board, rows: number, cols: number, r1: number, c1: n
   return hasMatch;
 }
 
-function shuffleBoard(state: EngineState, attempts: number): Frame[] {
+function shuffleBoard(state: EngineState, attempts: number): { frames: Frame[]; points: number } {
   const frames: Frame[] = [];
+  let shufflePoints = 0;
   const MAX_SHUFFLE_ATTEMPTS = 10;
+  const MAX_VISUAL_ATTEMPTS = 3;
   const { rows, cols, board } = state;
+
+  // Record old positions for slide animation (Phase 2D)
+  const oldPositions: Array<{ from: Pos; type: number }> = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (board[r][c]) oldPositions.push({ from: { r, c }, type: board[r][c]!.type });
+    }
+  }
 
   const gems: Cell[] = [];
   for (let r = 0; r < rows; r++) {
@@ -1029,31 +1129,54 @@ function shuffleBoard(state: EngineState, attempts: number): Frame[] {
   }
 
   let idx = 0;
+  const moves: Array<{ from: Pos; to: Pos; type: number }> = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      board[r][c] = gems[idx++];
+      board[r][c] = gems[idx];
+      if (oldPositions[idx]) {
+        moves.push({ from: oldPositions[idx].from, to: { r, c }, type: gems[idx].type });
+      }
+      idx++;
     }
   }
 
-  frames.push({ kind: 'shuffle', board: cloneBoard(board), attempt: attempts });
+  // Phase 4C: Only emit shuffle frames for first 3 attempts
+  if (attempts < MAX_VISUAL_ATTEMPTS) {
+    frames.push({ kind: 'shuffle', board: cloneBoard(board), attempt: attempts, moves });
+  }
 
+  // Phase 4A: Award points for shuffle cascades (don't discard)
   if (findMatches(board, rows, cols).length > 0) {
     const cascadeResult = processMatches(state, frames);
-    void cascadeResult;
+    shufflePoints += cascadeResult.points;
   }
 
   if (!hasValidMoves(board, rows, cols) && attempts < MAX_SHUFFLE_ATTEMPTS) {
-    frames.push(...shuffleBoard(state, attempts + 1));
+    const result = shuffleBoard(state, attempts + 1);
+    frames.push(...result.frames);
+    shufflePoints += result.points;
   } else if (!hasValidMoves(board, rows, cols)) {
     regenerateBoard(state);
     frames.push({ kind: 'shuffle', board: cloneBoard(state.board), attempt: attempts + 1 });
   }
 
-  return frames;
+  return { frames, points: shufflePoints };
 }
 
 function regenerateBoard(state: EngineState): void {
   const { rows, cols, gemTypes, rng } = state;
+
+  // Phase 4B: Preserve specials before regeneration
+  const savedSpecials: Cell[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = state.board[r][c];
+      if (cell && cell.special) {
+        savedSpecials.push({ ...cell });
+      }
+    }
+  }
+
   const board = createEmptyBoard(rows, cols);
 
   const randomGem = (r: number, c: number): number => {
@@ -1092,6 +1215,15 @@ function regenerateBoard(state: EngineState): void {
       }
     }
     attempts++;
+  }
+
+  // Place saved specials back at random positions
+  for (const special of savedSpecials) {
+    const r = rng.int(rows);
+    const c = rng.int(cols);
+    if (board[r][c]) {
+      board[r][c] = special;
+    }
   }
 
   state.board = board;
