@@ -29,6 +29,40 @@
   </div>
   <div class="combo-counter" id="comboCounter"></div>
   <div class="shuffle-notice" id="shuffleNotice">Reshuffling...</div>
+
+  <footer class="how-to-play">
+    <div class="how-to-play-inner">
+      <h2>How to Play</h2>
+      <div class="help-columns">
+        <div class="help-col">
+          <h3>Basics</h3>
+          <p>Swap adjacent gems to make rows or columns of 3 or more matching colors. Drag a gem onto its neighbor, or click one gem then click an adjacent gem to swap.</p>
+          <p>After a match clears, gems fall and new ones fill in from the top. If those create new matches, they chain automatically for bonus points.</p>
+        </div>
+        <div class="help-col">
+          <h3>Special Gems</h3>
+          <dl>
+            <dt>4 in a row</dt>
+            <dd>Creates a <strong>Bomb</strong> that explodes a 3&times;3 area when matched.</dd>
+            <dt>T or L shape</dt>
+            <dd>Also creates a <strong>Bomb</strong>.</dd>
+            <dt>5 in a row</dt>
+            <dd>Creates a <strong>Line</strong> gem that clears its entire row or column.</dd>
+            <dt>6+ in a group</dt>
+            <dd>Creates a <strong>Rainbow</strong> that clears all gems of a color when swapped.</dd>
+          </dl>
+        </div>
+        <div class="help-col">
+          <h3>Combining Specials</h3>
+          <p>Swap two special gems together for powerful combos. Bomb+Bomb makes a bigger explosion. Line+Line clears a full cross. Rainbow+Bomb explodes every gem of that color.</p>
+          <h3>Scoring</h3>
+          <p>Each gem cleared is worth 10 points. Longer matches and special gems add bonuses. Cascading chains multiply your score.</p>
+          <p>The <strong>Avg/Move</strong> display tracks your average points per move. Use the slider to change the number of gem colors.</p>
+        </div>
+      </div>
+    </div>
+  </footer>
+
   <script type="module" src="dist/app.js"></script>
 </body>
 </html>
