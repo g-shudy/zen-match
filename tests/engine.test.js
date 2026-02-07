@@ -158,11 +158,12 @@ test('6+ cell group creates RAINBOW', () => {
   // processMatches: len >= 6 -> RAINBOW
 });
 
-// Phase 3D: Rainbow + Normal clears both colors
-test('Rainbow + Normal swap clears both colors', () => {
+// Rainbow + Normal clears only the non-rainbow gem's color
+test('Rainbow + Normal swap clears only swapped color', () => {
   const engine = new Engine({ rows: 4, cols: 4, gemTypes: 4, seed: 42 });
-  // Rainbow gem of hidden color 0 swapped with normal gem of color 1
-  // Should clear both color 0 and color 1
+  // Rainbow gem of hidden color 0 at (0,0), swapped with normal gem of color 1 at (0,1)
+  // After swap, rainbow is at (0,1) and normal is at (0,0)
+  // Should clear only color 1, not color 0
   const board = [
     [makeCell(0, SPECIAL.RAINBOW), makeCell(1), makeCell(2), makeCell(3)],
     [makeCell(0), makeCell(2), makeCell(3), makeCell(1)],
@@ -176,16 +177,18 @@ test('Rainbow + Normal swap clears both colors', () => {
   assert.equal(result.moveValid, true);
   assert.ok(result.pointsEarned > 0);
 
-  // Check that the remove frame cleared both colors
   const removeFrame = result.frames.find(f => f.kind === 'remove');
   assert.ok(removeFrame, 'Should have a remove frame');
 
   if (removeFrame && removeFrame.kind === 'remove') {
-    // Should have removed gems of both color 0 and color 1
-    // Original board had: color 0 at (0,0), (1,0), (3,1), (3,2), (2,3) = wait, (2,3) is color 0
-    // color 1 at (0,1), (1,3), (2,2), plus the rainbow itself
-    // Total removed should include both colors
-    assert.ok(removeFrame.positions.length > 4, 'Should remove many gems (both colors)');
+    const removedKeys = new Set(removeFrame.positions.map(p => `${p.r},${p.c}`));
+    // Color 1 gems should be removed: (0,1), (1,3), (2,2)
+    assert.ok(removedKeys.has('1,3') || removedKeys.has('2,2'),
+      'Should remove color 1 gems');
+    // Color 0 gems (not the rainbow) should NOT be in the initial removal
+    const color0Positions = ['1,0', '2,3', '3,1', '3,2'];
+    const removedColor0 = color0Positions.filter(k => removedKeys.has(k));
+    assert.equal(removedColor0.length, 0, 'Should not remove color 0 gems');
   }
 });
 

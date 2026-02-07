@@ -465,18 +465,16 @@ export class Engine {
     } else if (gem1Special === SPECIAL.RAINBOW || gem2Special === SPECIAL.RAINBOW) {
       const gem1IsRainbow = gem1Special === SPECIAL.RAINBOW;
       const targetType = gem1IsRainbow ? gem2?.type : gem1?.type;
-      const rainbowType = gem1IsRainbow ? gem1?.type : gem2?.type;
       const rainbowPos = gem1IsRainbow ? pos2 : pos1;
 
       const toRemove = new Set<string>();
       const animationClasses = new Map<string, RemovalAnim>();
       const effects: Effect[] = [];
 
-      // Phase 3D: Clear BOTH the rainbow's hidden color AND the swapped gem's color
+      // Clear all gems matching the non-rainbow gem's color
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-          const cellType = board[r][c]?.type;
-          if (cellType === targetType || cellType === rainbowType) {
+          if (board[r][c]?.type === targetType) {
             const k = keyFor(r, c);
             toRemove.add(k);
             animationClasses.set(k, 'rainbow-cleared');
