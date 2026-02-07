@@ -464,10 +464,18 @@ async function playFrames(frames: Frame[], token: number): Promise<void> {
 
         // Phase 5B: If sub-steps exist, play them sequentially
         if (frame.subSteps && frame.subSteps.length > 0) {
-          // Initial match removal
-          applyRemovalAnimations(frame.positions, frame.animations);
+          // Collect positions that subSteps will animate later
+          const subStepKeys = new Set<string>();
+          for (const step of frame.subSteps) {
+            for (const pos of step.positions) {
+              subStepKeys.add(`${pos.r},${pos.c}`);
+            }
+          }
+          // Only animate initially matched positions, not chain-reaction victims
+          const initialPositions = frame.positions.filter(pos => !subStepKeys.has(`${pos.r},${pos.c}`));
+          applyRemovalAnimations(initialPositions, frame.animations);
           await sleep(300);
-          // Then play special activation sequences
+          // Then play special activation sequences (which animate blast victims)
           await playSubSteps(frame.subSteps, token);
         } else {
           applyRemovalAnimations(frame.positions, frame.animations);
