@@ -824,6 +824,20 @@ h1 {
 .shuffle-notice.show {
   opacity: 1;
 }
+.version-tag {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  font-size: 0.65rem;
+  color: #4a6a74;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: color 0.2s ease;
+  z-index: 101;
+}
+.version-tag:hover {
+  color: #95d5b2;
+}
 .back-link {
   position: fixed;
   top: 20px;

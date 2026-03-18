@@ -955,6 +955,9 @@ function regenerateBoard(state) {
 }
 
 // src/main.ts
+document.getElementById("versionTag").addEventListener("click", () => {
+  location.reload();
+});
 var urlParams = new URLSearchParams(window.location.search);
 var GRID_SIZE = parseInt(urlParams.get("grid") || "8", 10);
 GRID_SIZE = Math.max(4, Math.min(16, GRID_SIZE));

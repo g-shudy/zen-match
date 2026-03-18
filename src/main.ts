@@ -10,6 +10,10 @@ import {
   type RemovalSubStep
 } from './engine/index';
 
+document.getElementById('versionTag')!.addEventListener('click', () => {
+  location.reload();
+});
+
 const urlParams = new URLSearchParams(window.location.search);
 
 let GRID_SIZE = parseInt(urlParams.get('grid') || '8', 10);
