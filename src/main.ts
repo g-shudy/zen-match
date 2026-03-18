@@ -10,10 +10,14 @@ import {
   type RemovalSubStep
 } from './engine/index';
 
-const ROWS = 8;
-const COLS = 8;
-
 const urlParams = new URLSearchParams(window.location.search);
+
+let GRID_SIZE = parseInt(urlParams.get('grid') || '8', 10);
+GRID_SIZE = Math.max(4, Math.min(16, GRID_SIZE));
+let ROWS = GRID_SIZE;
+let COLS = GRID_SIZE;
+let pendingGridSize = GRID_SIZE;
+
 let GEM_TYPES = parseInt(urlParams.get('gems') || '5', 10);
 GEM_TYPES = Math.max(2, Math.min(10, GEM_TYPES));
 let pendingGemTypes = GEM_TYPES;
@@ -46,6 +50,8 @@ const avgSparklineEl = document.getElementById('avgSparkline') as HTMLCanvasElem
 const newGameBtn = document.getElementById('newGame') as HTMLButtonElement;
 const gemSlider = document.getElementById('gemSlider') as HTMLInputElement;
 const gemSliderValue = document.getElementById('gemSliderValue') as HTMLSpanElement;
+const gridSlider = document.getElementById('gridSlider') as HTMLInputElement;
+const gridSliderValue = document.getElementById('gridSliderValue') as HTMLSpanElement;
 const floatingMessage = document.getElementById('floatingMessage') as HTMLDivElement;
 
 const cells: HTMLDivElement[] = [];
@@ -75,10 +81,19 @@ function formatNumber(n: number): string {
   return standardFormatter.format(n);
 }
 
+function updateBoardSizing(): void {
+  const cellSize = Math.max(20, Math.floor(400 / COLS));
+  const gemSize = cellSize - 8;
+  boardEl.style.setProperty('--grid-cols', String(COLS));
+  boardEl.style.setProperty('--cell-size', `${cellSize}px`);
+  boardEl.style.setProperty('--gem-size', `${gemSize}px`);
+}
+
 function createGrid(): void {
   boardEl.innerHTML = '';
   cells.length = 0;
   gems.length = 0;
+  updateBoardSizing();
 
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
@@ -571,22 +586,42 @@ function resetStats(): void {
 }
 
 function startNewGame(): void {
+  const newUrl = new URL(window.location.toString());
+  let needsGridRebuild = false;
+
   if (pendingGemTypes !== GEM_TYPES) {
     GEM_TYPES = pendingGemTypes;
-    const newUrl = new URL(window.location.toString());
     if (GEM_TYPES === 5) {
       newUrl.searchParams.delete('gems');
     } else {
       newUrl.searchParams.set('gems', GEM_TYPES.toString());
     }
-    history.replaceState({}, '', newUrl);
   }
+
+  if (pendingGridSize !== GRID_SIZE) {
+    GRID_SIZE = pendingGridSize;
+    ROWS = GRID_SIZE;
+    COLS = GRID_SIZE;
+    needsGridRebuild = true;
+    if (GRID_SIZE === 8) {
+      newUrl.searchParams.delete('grid');
+    } else {
+      newUrl.searchParams.set('grid', GRID_SIZE.toString());
+    }
+  }
+
+  history.replaceState({}, '', newUrl);
 
   if (!seedLocked) {
     seed = Date.now();
   }
 
   engine.reset({ rows: ROWS, cols: COLS, gemTypes: GEM_TYPES, seed });
+
+  if (needsGridRebuild) {
+    createGrid();
+  }
+
   const board = engine.init();
   resetStats();
   renderBoard(board);
@@ -730,20 +765,32 @@ newGameBtn.addEventListener('click', () => {
 
 gemSlider.value = GEM_TYPES.toString();
 gemSliderValue.textContent = GEM_TYPES.toString();
+gridSlider.value = GRID_SIZE.toString();
+gridSliderValue.textContent = `${GRID_SIZE}x${GRID_SIZE}`;
 let floatingMessageTimeout: number | undefined;
 
-gemSlider.addEventListener('input', () => {
-  const newValue = parseInt(gemSlider.value, 10);
-  gemSliderValue.textContent = newValue.toString();
-  pendingGemTypes = newValue;
-
-  if (newValue !== GEM_TYPES) {
+function showSliderChangeMessage(): void {
+  if (pendingGemTypes !== GEM_TYPES || pendingGridSize !== GRID_SIZE) {
     showFloatingMessage('New Game to apply');
     if (floatingMessageTimeout) window.clearTimeout(floatingMessageTimeout);
     floatingMessageTimeout = window.setTimeout(hideFloatingMessage, 3000);
   } else {
     hideFloatingMessage();
   }
+}
+
+gemSlider.addEventListener('input', () => {
+  const newValue = parseInt(gemSlider.value, 10);
+  gemSliderValue.textContent = newValue.toString();
+  pendingGemTypes = newValue;
+  showSliderChangeMessage();
+});
+
+gridSlider.addEventListener('input', () => {
+  const newValue = parseInt(gridSlider.value, 10);
+  gridSliderValue.textContent = `${newValue}x${newValue}`;
+  pendingGridSize = newValue;
+  showSliderChangeMessage();
 });
 
 function sleep(ms: number): Promise<void> {

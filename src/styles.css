@@ -173,7 +173,7 @@ h1 {
 .board {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(var(--grid-cols, 8), 1fr);
   gap: 4px;
   padding: 16px;
   background: rgba(255, 255, 255, 0.03);
@@ -220,8 +220,8 @@ h1 {
 }
 
 .cell {
-  width: 48px;
-  height: 48px;
+  width: var(--cell-size, 48px);
+  height: var(--cell-size, 48px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -235,8 +235,8 @@ h1 {
 }
 
 .gem {
-  width: 40px;
-  height: 40px;
+  width: var(--gem-size, 40px);
+  height: var(--gem-size, 40px);
   border-radius: 10px;
   position: absolute;
   display: flex;
@@ -533,13 +533,13 @@ h1 {
 }
 
 .line-effect.horizontal {
-  height: 48px;
+  height: var(--cell-size, 48px);
   width: 100%;
   left: 0;
 }
 
 .line-effect.vertical {
-  width: 48px;
+  width: var(--cell-size, 48px);
   height: 100%;
   top: 0;
   background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.8), transparent);
