@@ -16,19 +16,18 @@ document.getElementById('versionTag')!.addEventListener('click', () => {
 
 const urlParams = new URLSearchParams(window.location.search);
 
-let _gridSize = parseInt(urlParams.get('grid') || '8', 10);
-_gridSize = Math.max(4, Math.min(16, _gridSize));
-let _gemTypes = parseInt(urlParams.get('gems') || '5', 10);
-_gemTypes = Math.max(2, Math.min(10, _gemTypes));
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const seedParam = urlParams.get('seed');
+const initGridSize = clamp(parseInt(urlParams.get('grid') || '8', 10), 4, 16);
+const initGemTypes = clamp(parseInt(urlParams.get('gems') || '5', 10), 2, 10);
 
 const config = {
-  gridSize: _gridSize,
-  rows: _gridSize,
-  cols: _gridSize,
-  gemTypes: _gemTypes,
-  pendingGridSize: _gridSize,
-  pendingGemTypes: _gemTypes,
+  gridSize: initGridSize,
+  rows: initGridSize,
+  cols: initGridSize,
+  gemTypes: initGemTypes,
+  pendingGridSize: initGridSize,
+  pendingGemTypes: initGemTypes,
   seed: seedParam ? parseInt(seedParam, 10) : Date.now(),
   seedLocked: seedParam !== null,
   maxHistory: 20,
@@ -88,28 +87,24 @@ const floatingMessage = getEl<HTMLDivElement>('floatingMessage');
 
 const cells: HTMLDivElement[] = [];
 const gems: HTMLDivElement[] = [];
+const shapes: HTMLSpanElement[] = [];
 
-const gemColors = [
-  '#7ec8e3',
-  '#e07a5f',
-  '#95d5b2',
-  '#f4d35e',
-  '#dda0dd',
-  '#e8a87c',
-  '#4ecdc4',
-  '#ff9f43',
-  '#5f6caf',
-  '#ff6b9d'
+const defaultGemColors = [
+  '#7ec8e3', '#e07a5f', '#95d5b2', '#f4d35e', '#dda0dd',
+  '#e8a87c', '#4ecdc4', '#ff9f43', '#5f6caf', '#ff6b9d'
 ];
-
-let activeGemColors = [...gemColors];
+let activeGemColors = [...defaultGemColors];
 
 function refreshGemColors(): void {
   const style = getComputedStyle(document.documentElement);
   for (let i = 0; i < 10; i++) {
     const val = style.getPropertyValue(`--gem-color-${i}`).trim();
-    if (val) activeGemColors[i] = val;
+    activeGemColors[i] = val || defaultGemColors[i];
   }
+}
+
+function posIdx(r: number, c: number): number {
+  return r * config.cols + c;
 }
 
 const compactFormatter = new Intl.NumberFormat(undefined, {
@@ -136,6 +131,7 @@ function createGrid(): void {
   boardEl.innerHTML = '';
   cells.length = 0;
   gems.length = 0;
+  shapes.length = 0;
   updateBoardSizing();
 
   for (let r = 0; r < config.rows; r++) {
@@ -158,6 +154,7 @@ function createGrid(): void {
       boardEl.appendChild(cell);
       cells.push(cell);
       gems.push(gem);
+      shapes.push(shape);
     }
   }
 
@@ -169,26 +166,19 @@ function renderBoard(board: Board): void {
   gameState.currentBoard = board;
   for (let r = 0; r < config.rows; r++) {
     for (let c = 0; c < config.cols; c++) {
-      const idx = r * config.cols + c;
+      const idx = posIdx(r, c);
       const gemEl = gems[idx];
+      const shapeEl = shapes[idx];
       const cell = board[r][c];
-
-      const shapeEl = gemEl.querySelector('.gem-shape') as HTMLElement;
 
       if (!cell) {
         gemEl.className = 'gem empty';
-        if (shapeEl) {
-          shapeEl.className = 'gem-shape';
-          gemEl.appendChild(shapeEl);
-        }
+        shapeEl.className = 'gem-shape';
         continue;
       }
 
       gemEl.className = `gem gem-${cell.type}`;
-      if (shapeEl) {
-        shapeEl.className = `gem-shape shape-${cell.type}`;
-        gemEl.appendChild(shapeEl);
-      }
+      shapeEl.className = `gem-shape shape-${cell.type}`;
 
       if (cell.special === SPECIAL.BOMB) {
         gemEl.classList.add('special-bomb');
@@ -201,12 +191,8 @@ function renderBoard(board: Board): void {
 
       if (gameState.selected && gameState.selected.r === r && gameState.selected.c === c) {
         gemEl.classList.add('selected');
-      } else if (gameState.selected) {
-        const dr = Math.abs(gameState.selected.r - r);
-        const dc = Math.abs(gameState.selected.c - c);
-        if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
-          gemEl.classList.add('swap-target');
-        }
+      } else if (gameState.selected && isAdjacent(gameState.selected, { r, c })) {
+        gemEl.classList.add('swap-target');
       }
     }
   }
@@ -274,7 +260,7 @@ function renderStats(): void {
 }
 
 function liveUpdateStats(board: Board): void {
-  if (gameState.pendingPoints > 0 && gameState.gameMoves >= 0) {
+  if (gameState.pendingPoints > 0) {
     const projectedAvg = Math.round((gameState.gamePoints + gameState.pendingPoints) / (gameState.gameMoves + 1));
     avgScoreEl.textContent = formatNumber(projectedAvg);
 
@@ -854,7 +840,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-window.addEventListener('resize', () => { updateBoardSizing(); });
+window.addEventListener('resize', updateBoardSizing);
 
 function showOnboarding(): void {
   if (localStorage.getItem('zen-match-visited')) return;
