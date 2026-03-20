@@ -145,11 +145,66 @@ h1 {
   max-width: 100%;
 }
 
+.score-display {
+  font-weight: 300;
+  font-size: 1.1rem;
+  letter-spacing: 0.1em;
+  color: #95d5b2;
+}
+
+.score-display .score-label {
+  font-size: 0.75rem;
+  color: #7a9ea8;
+  margin-left: 2px;
+}
+
+.settings-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #7a9ea8;
+  font-size: 1.2rem;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-btn:hover {
+  color: #95d5b2;
+  border-color: rgba(149, 213, 178, 0.4);
+}
+
+.settings-panel {
+  display: none;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+}
+
+.settings-panel.open {
+  display: flex;
+}
+
 .avg-display {
   font-weight: 300;
-  font-size: 1rem;
+  font-size: 0.85rem;
   letter-spacing: 0.15em;
   color: #7a9ea8;
+}
+
+.gem-slider-label {
+  font-size: 0.8rem;
+  color: #7a9ea8;
+  min-width: 2.5em;
 }
 
 .gem-slider-container {
@@ -390,9 +445,9 @@ h1 {
 }
 
 @keyframes lineClear {
-  0% { transform: scale(1) scaleX(1); opacity: 1; }
-  50% { transform: scale(1.2) scaleX(1.5); opacity: 0.8; }
-  100% { transform: scale(0) scaleX(2); opacity: 0; }
+  0% { transform: scale(1); opacity: 1; filter: brightness(1); }
+  40% { transform: scaleX(1.8) scaleY(0.6); opacity: 1; filter: brightness(1.5); }
+  100% { transform: scaleX(2.5) scaleY(0); opacity: 0; filter: brightness(1); }
 }
 
 .gem.rainbow-cleared {
@@ -459,25 +514,66 @@ h1 {
 }
 
 .gem.just-created {
-  animation: specialAppear 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  animation: specialAppear 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
 @keyframes specialAppear {
-  0% { transform: scale(0); opacity: 0; }
-  60% { transform: scale(1.1); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
+  0% { transform: scale(0) rotate(-15deg); opacity: 0; filter: brightness(1); }
+  50% { transform: scale(1.2) rotate(5deg); opacity: 1; filter: brightness(1.5); }
+  70% { transform: scale(0.95) rotate(-2deg); opacity: 1; filter: brightness(1.2); }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; filter: brightness(1); }
 }
 
-.gem-0 { background: linear-gradient(135deg, var(--gem-color-0) 0%, var(--gem-color-0-dark) 100%); color: var(--gem-color-0); }
-.gem-1 { background: linear-gradient(135deg, var(--gem-color-1) 0%, var(--gem-color-1-dark) 100%); color: var(--gem-color-1); }
-.gem-2 { background: linear-gradient(135deg, var(--gem-color-2) 0%, var(--gem-color-2-dark) 100%); color: var(--gem-color-2); }
-.gem-3 { background: linear-gradient(135deg, var(--gem-color-3) 0%, var(--gem-color-3-dark) 100%); color: var(--gem-color-3); }
-.gem-4 { background: linear-gradient(135deg, var(--gem-color-4) 0%, var(--gem-color-4-dark) 100%); color: var(--gem-color-4); }
-.gem-5 { background: linear-gradient(135deg, var(--gem-color-5) 0%, var(--gem-color-5-dark) 100%); color: var(--gem-color-5); }
-.gem-6 { background: linear-gradient(135deg, var(--gem-color-6) 0%, var(--gem-color-6-dark) 100%); color: var(--gem-color-6); }
-.gem-7 { background: linear-gradient(135deg, var(--gem-color-7) 0%, var(--gem-color-7-dark) 100%); color: var(--gem-color-7); }
-.gem-8 { background: linear-gradient(135deg, var(--gem-color-8) 0%, var(--gem-color-8-dark) 100%); color: var(--gem-color-8); }
-.gem-9 { background: linear-gradient(135deg, var(--gem-color-9) 0%, var(--gem-color-9-dark) 100%); color: var(--gem-color-9); }
+.gem-0 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, transparent 50%),
+              linear-gradient(135deg, var(--gem-color-0) 0%, var(--gem-color-0-dark) 100%);
+  color: var(--gem-color-0);
+}
+.gem-1 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, transparent 50%),
+              linear-gradient(135deg, var(--gem-color-1) 0%, var(--gem-color-1-dark) 100%);
+  color: var(--gem-color-1);
+}
+.gem-2 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, transparent 50%),
+              linear-gradient(135deg, var(--gem-color-2) 0%, var(--gem-color-2-dark) 100%);
+  color: var(--gem-color-2);
+}
+.gem-3 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, transparent 50%),
+              linear-gradient(135deg, var(--gem-color-3) 0%, var(--gem-color-3-dark) 100%);
+  color: var(--gem-color-3);
+}
+.gem-4 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, transparent 50%),
+              linear-gradient(135deg, var(--gem-color-4) 0%, var(--gem-color-4-dark) 100%);
+  color: var(--gem-color-4);
+}
+.gem-5 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, transparent 50%),
+              linear-gradient(135deg, var(--gem-color-5) 0%, var(--gem-color-5-dark) 100%);
+  color: var(--gem-color-5);
+}
+.gem-6 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, transparent 50%),
+              linear-gradient(135deg, var(--gem-color-6) 0%, var(--gem-color-6-dark) 100%);
+  color: var(--gem-color-6);
+}
+.gem-7 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, transparent 50%),
+              linear-gradient(135deg, var(--gem-color-7) 0%, var(--gem-color-7-dark) 100%);
+  color: var(--gem-color-7);
+}
+.gem-8 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, transparent 50%),
+              linear-gradient(135deg, var(--gem-color-8) 0%, var(--gem-color-8-dark) 100%);
+  color: var(--gem-color-8);
+}
+.gem-9 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, transparent 50%),
+              linear-gradient(135deg, var(--gem-color-9) 0%, var(--gem-color-9-dark) 100%);
+  color: var(--gem-color-9);
+}
 
 /* Gem shapes - always on for accessibility */
 .gem-shape {
@@ -730,8 +826,9 @@ h1 {
 }
 
 @keyframes scoreFloat {
-  0% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-  100% { opacity: 0; transform: translateX(calc(-50% + var(--drift, 30px))) translateY(-40px) scale(1.2); }
+  0% { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.5); }
+  15% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.1); }
+  100% { opacity: 0; transform: translateX(calc(-50% + var(--drift, 30px))) translateY(-50px) scale(0.85); }
 }
 
 .hint-text {
@@ -870,6 +967,16 @@ h1 {
   background: rgba(149, 213, 178, 0.4);
   border-color: rgba(149, 213, 178, 0.6);
   color: #c5f0d6;
+}
+
+.new-game-btn.pending-change {
+  animation: pendingPulse 1.5s ease-in-out infinite;
+  border-color: rgba(149, 213, 178, 0.6);
+}
+
+@keyframes pendingPulse {
+  0%, 100% { background: rgba(149, 213, 178, 0.2); }
+  50% { background: rgba(149, 213, 178, 0.35); }
 }
 
 /* How to Play -- collapsible bottom bar */
