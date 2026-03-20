@@ -16,12 +16,20 @@
     <h1>Zen Match</h1>
     <div class="controls-row">
       <button class="new-game-btn" id="newGame">New Game</button>
-      <div class="avg-display">Avg/Move: <span id="avgScore" aria-live="polite" role="status">0</span></div>
+      <div class="score-display">
+        <span id="totalScore">0</span>
+        <span class="score-label">pts</span>
+      </div>
+      <button class="settings-btn" id="settingsBtn" aria-label="Settings">&#9881;</button>
+    </div>
+    <div class="settings-panel" id="settingsPanel">
       <div class="gem-slider-container">
+        <span class="gem-slider-label">Gems</span>
         <input type="range" id="gemSlider" min="2" max="10" value="5" class="gem-slider">
         <span class="gem-slider-value" id="gemSliderValue">5</span>
       </div>
       <div class="gem-slider-container">
+        <span class="gem-slider-label">Grid</span>
         <input type="range" id="gridSlider" min="4" max="16" value="8" class="gem-slider">
         <span class="gem-slider-value" id="gridSliderValue">8x8</span>
       </div>
@@ -32,14 +40,13 @@
           <option value="highcontrast">Hi-Con</option>
         </select>
       </div>
+      <div class="avg-display">Avg/Move: <span id="avgScore" aria-live="polite" role="status">0</span></div>
     </div>
     <div class="floating-message" id="floatingMessage"></div>
     <div class="board" id="board" aria-label="Game board" role="grid">
       <div class="combo-counter" id="comboCounter" aria-live="polite"></div>
     </div>
     <div class="stats-section">
-      <div class="distribution-history" id="distHistory"></div>
-      <canvas class="avg-sparkline" id="avgSparkline" width="200" height="24"></canvas>
       <div class="score-history" id="scoreHistory"></div>
     </div>
   </div>

@@ -73,11 +73,12 @@ function getEl<T extends HTMLElement>(id: string): T {
 
 const boardEl = getEl<HTMLDivElement>('board');
 const avgScoreEl = getEl<HTMLSpanElement>('avgScore');
+const totalScoreEl = getEl<HTMLSpanElement>('totalScore');
 const scoreHistoryEl = getEl<HTMLDivElement>('scoreHistory');
 const comboCounterEl = getEl<HTMLDivElement>('comboCounter');
 const shuffleNotice = getEl<HTMLDivElement>('shuffleNotice');
-const distHistoryEl = getEl<HTMLDivElement>('distHistory');
-const avgSparklineEl = getEl<HTMLCanvasElement>('avgSparkline');
+const distHistoryEl = document.getElementById('distHistory') as HTMLDivElement | null;
+const avgSparklineEl = document.getElementById('avgSparkline') as HTMLCanvasElement | null;
 const newGameBtn = getEl<HTMLButtonElement>('newGame');
 const gemSlider = getEl<HTMLInputElement>('gemSlider');
 const gemSliderValue = getEl<HTMLSpanElement>('gemSliderValue');
@@ -85,6 +86,8 @@ const gridSlider = getEl<HTMLInputElement>('gridSlider');
 const gridSliderValue = getEl<HTMLSpanElement>('gridSliderValue');
 const floatingMessage = getEl<HTMLDivElement>('floatingMessage');
 const paletteSelect = getEl<HTMLSelectElement>('paletteSelect');
+const settingsBtn = getEl<HTMLButtonElement>('settingsBtn');
+const settingsPanel = getEl<HTMLDivElement>('settingsPanel');
 
 const cells: HTMLDivElement[] = [];
 const gems: HTMLDivElement[] = [];
@@ -211,6 +214,7 @@ function getGemDistribution(board: Board): number[] {
 
 function renderSparkline(history: number[], isLive = false): void {
   const canvas = avgSparklineEl;
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
@@ -253,7 +257,9 @@ function distBarHTML(dist: number[]): string {
 }
 
 function renderStats(): void {
-  distHistoryEl.innerHTML = gameState.distHistory.map(dist => distBarHTML(dist)).join('');
+  if (distHistoryEl) {
+    distHistoryEl.innerHTML = gameState.distHistory.map(dist => distBarHTML(dist)).join('');
+  }
 
   renderSparkline(gameState.avgHistory, false);
 
@@ -274,7 +280,9 @@ function liveUpdateStats(board: Board): void {
     renderSparkline(liveAvgHistory, true);
   }
 
-  distHistoryEl.innerHTML = [...gameState.distHistory, getGemDistribution(board)].slice(-config.maxHistory).map(dist => distBarHTML(dist)).join('');
+  if (distHistoryEl) {
+    distHistoryEl.innerHTML = [...gameState.distHistory, getGemDistribution(board)].slice(-config.maxHistory).map(dist => distBarHTML(dist)).join('');
+  }
 }
 
 function recordMove(board: Board, points: number): void {
@@ -289,6 +297,7 @@ function recordMove(board: Board, points: number): void {
     gameState.gameMoves++;
     const currentAvg = Math.round(gameState.gamePoints / gameState.gameMoves);
     avgScoreEl.textContent = formatNumber(currentAvg);
+    totalScoreEl.textContent = formatNumber(gameState.gamePoints);
 
     gameState.avgHistory.push(currentAvg);
     if (gameState.avgHistory.length > config.maxHistory) gameState.avgHistory.shift();
