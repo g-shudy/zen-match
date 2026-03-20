@@ -16,7 +16,7 @@
     <h1>Zen Match</h1>
     <div class="controls-row">
       <button class="new-game-btn" id="newGame">New Game</button>
-      <div class="avg-display">Avg/Move: <span id="avgScore">0</span></div>
+      <div class="avg-display">Avg/Move: <span id="avgScore" aria-live="polite" role="status">0</span></div>
       <div class="gem-slider-container">
         <input type="range" id="gemSlider" min="2" max="10" value="5" class="gem-slider">
         <span class="gem-slider-value" id="gemSliderValue">5</span>
@@ -27,14 +27,14 @@
       </div>
     </div>
     <div class="floating-message" id="floatingMessage"></div>
-    <div class="board" id="board"></div>
+    <div class="board" id="board" aria-label="Game board" role="grid"></div>
     <div class="stats-section">
       <div class="distribution-history" id="distHistory"></div>
       <canvas class="avg-sparkline" id="avgSparkline" width="200" height="24"></canvas>
       <div class="score-history" id="scoreHistory"></div>
     </div>
   </div>
-  <div class="combo-counter" id="comboCounter"></div>
+  <div class="combo-counter" id="comboCounter" aria-live="polite"></div>
   <div class="shuffle-notice" id="shuffleNotice">Reshuffling...</div>
   <span class="version-tag" id="versionTag">v1.0</span>
 
