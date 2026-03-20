@@ -127,9 +127,15 @@ function formatNumber(n: number): string {
 }
 
 function updateBoardSizing(): void {
-  const maxBoardWidth = Math.min(window.innerWidth - 32, 500);
-  const cellSize = Math.max(28, Math.floor(maxBoardWidth / config.cols));
-  const gemSize = cellSize - 8;
+  const isMobile = window.innerWidth <= 480;
+  const boardPadding = isMobile ? 12 : 32; // 6px each side or 16px each side
+  const gap = isMobile ? 1 : 4;
+  const totalGaps = (config.cols - 1) * gap;
+  const availWidth = Math.min(window.innerWidth - 16, 532) - boardPadding - totalGaps;
+  const availHeight = window.innerHeight - 200 - boardPadding - totalGaps;
+  const avail = Math.min(availWidth, availHeight);
+  const cellSize = Math.max(18, Math.floor(avail / config.cols));
+  const gemSize = cellSize - (cellSize < 28 ? 4 : 6);
   boardEl.style.setProperty('--grid-cols', String(config.cols));
   boardEl.style.setProperty('--cell-size', `${cellSize}px`);
   boardEl.style.setProperty('--gem-size', `${gemSize}px`);
@@ -788,6 +794,7 @@ function isAdjacent(a: Pos, b: Pos): boolean {
 
 let hintTimer: number | undefined;
 let hintedCells: number[] = [];
+let hintsEnabled = localStorage.getItem('zen-match-hints') !== 'off';
 
 function clearHint(): void {
   for (const idx of hintedCells) {
@@ -797,7 +804,7 @@ function clearHint(): void {
 }
 
 function showHint(): void {
-  if (gameState.isProcessing) return;
+  if (gameState.isProcessing || !hintsEnabled) return;
   clearHint();
   const move = engine.findValidMove();
   if (!move) return;
@@ -811,7 +818,9 @@ function showHint(): void {
 function resetHintTimer(): void {
   clearTimeout(hintTimer);
   clearHint();
-  hintTimer = window.setTimeout(showHint, 6000);
+  if (hintsEnabled) {
+    hintTimer = window.setTimeout(showHint, 6000);
+  }
 }
 
 let pointerId: number | null = null;
@@ -1018,6 +1027,15 @@ modeToggle.addEventListener('change', () => {
   const mode = modeToggle.checked ? 'classic' : 'zen';
   document.body.dataset.mode = mode;
   localStorage.setItem('zen-match-mode', mode);
+});
+
+const hintsToggle = getEl<HTMLInputElement>('hintsToggle');
+hintsToggle.checked = hintsEnabled;
+hintsToggle.addEventListener('change', () => {
+  hintsEnabled = hintsToggle.checked;
+  localStorage.setItem('zen-match-hints', hintsEnabled ? 'on' : 'off');
+  if (!hintsEnabled) clearHint();
+  else resetHintTimer();
 });
 
 // T44: Session-length awareness (zen mode only)
