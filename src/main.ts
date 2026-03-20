@@ -672,10 +672,14 @@ function startNewGame(): void {
   gameState.distHistory = [getGemDistribution(board)];
   renderStats();
   hideFloatingMessage();
+  resetHintTimer();
 }
 
 async function trySwap(pos1: Pos, pos2: Pos): Promise<void> {
   if (gameState.isProcessing) return;
+
+  clearHint();
+  clearTimeout(hintTimer);
 
   gameState.isProcessing = true;
   boardEl.classList.add('processing');
@@ -695,12 +699,42 @@ async function trySwap(pos1: Pos, pos2: Pos): Promise<void> {
   setTimeout(() => {
     comboCounterEl.classList.remove('show');
   }, config.timing.comboHide);
+
+  resetHintTimer();
 }
 
 function isAdjacent(a: Pos, b: Pos): boolean {
   const dr = Math.abs(a.r - b.r);
   const dc = Math.abs(a.c - b.c);
   return (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
+}
+
+let hintTimer: number | undefined;
+let hintedCells: number[] = [];
+
+function clearHint(): void {
+  for (const idx of hintedCells) {
+    gems[idx]?.classList.remove('hint-glow');
+  }
+  hintedCells = [];
+}
+
+function showHint(): void {
+  if (isProcessing) return;
+  clearHint();
+  const move = engine.findValidMove();
+  if (!move) return;
+  const idx1 = move.r1 * COLS + move.c1;
+  const idx2 = move.r2 * COLS + move.c2;
+  gems[idx1]?.classList.add('hint-glow');
+  gems[idx2]?.classList.add('hint-glow');
+  hintedCells = [idx1, idx2];
+}
+
+function resetHintTimer(): void {
+  clearTimeout(hintTimer);
+  clearHint();
+  hintTimer = window.setTimeout(showHint, 6000);
 }
 
 let pointerId: number | null = null;
@@ -716,6 +750,7 @@ boardEl.addEventListener('pointerdown', (event: PointerEvent) => {
   if (!cell) return;
 
   event.preventDefault();
+  resetHintTimer();
   const r = Number(cell.dataset.row);
   const c = Number(cell.dataset.col);
   pointerId = event.pointerId;

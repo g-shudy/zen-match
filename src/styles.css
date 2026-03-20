@@ -1100,6 +1100,15 @@ h1 {
   font-weight: 500;
 }
 
+.gem.hint-glow {
+  animation: hintPulse 2s ease-in-out infinite;
+}
+
+@keyframes hintPulse {
+  0%, 100% { box-shadow: 0 4px 12px rgba(0,0,0,0.3), inset 0 2px 4px rgba(255,255,255,0.3), inset 0 -2px 4px rgba(0,0,0,0.2); }
+  50% { box-shadow: 0 0 12px rgba(149, 213, 178, 0.5), 0 4px 12px rgba(0,0,0,0.3), inset 0 2px 4px rgba(255,255,255,0.3); }
+}
+
 @media (max-width: 480px) {
   .controls-row {
     gap: 8px 12px;
