@@ -934,6 +934,10 @@ newGameBtn.addEventListener('click', () => {
   startNewGame();
 });
 
+settingsBtn.addEventListener('click', () => {
+  settingsPanel.classList.toggle('open');
+});
+
 gemSlider.value = config.gemTypes.toString();
 gemSliderValue.textContent = config.gemTypes.toString();
 gridSlider.value = config.gridSize.toString();
