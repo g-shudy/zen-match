@@ -16,33 +16,55 @@ document.getElementById('versionTag')!.addEventListener('click', () => {
 
 const urlParams = new URLSearchParams(window.location.search);
 
-let GRID_SIZE = parseInt(urlParams.get('grid') || '8', 10);
-GRID_SIZE = Math.max(4, Math.min(16, GRID_SIZE));
-let ROWS = GRID_SIZE;
-let COLS = GRID_SIZE;
-let pendingGridSize = GRID_SIZE;
-
-let GEM_TYPES = parseInt(urlParams.get('gems') || '5', 10);
-GEM_TYPES = Math.max(2, Math.min(10, GEM_TYPES));
-let pendingGemTypes = GEM_TYPES;
+let _gridSize = parseInt(urlParams.get('grid') || '8', 10);
+_gridSize = Math.max(4, Math.min(16, _gridSize));
+let _gemTypes = parseInt(urlParams.get('gems') || '5', 10);
+_gemTypes = Math.max(2, Math.min(10, _gemTypes));
 const seedParam = urlParams.get('seed');
-const seedLocked = seedParam !== null;
-let seed = seedParam ? parseInt(seedParam, 10) : Date.now();
 
-const engine = new Engine({ rows: ROWS, cols: COLS, gemTypes: GEM_TYPES, seed });
-let currentBoard: Board = engine.state.board;
+const config = {
+  gridSize: _gridSize,
+  rows: _gridSize,
+  cols: _gridSize,
+  gemTypes: _gemTypes,
+  pendingGridSize: _gridSize,
+  pendingGemTypes: _gemTypes,
+  seed: seedParam ? parseInt(seedParam, 10) : Date.now(),
+  seedLocked: seedParam !== null,
+  maxHistory: 20,
+  timing: {
+    swap: 200,
+    invalid: 400,
+    remove: 400,
+    substepTrigger: 150,
+    substepClear: 300,
+    boardSync: 100,
+    specialCreated: 300,
+    drop: 250,
+    fill: 200,
+    preview: 400,
+    shufflePause: 500,
+    shuffleMove: 700,
+    comboHide: 500,
+    scorePopup: 1000,
+  },
+};
 
-let selected: Pos | null = null;
-let isProcessing = false;
-let runToken = 0;
-let pendingPoints = 0;
+const gameState = {
+  selected: null as Pos | null,
+  isProcessing: false,
+  runToken: 0,
+  pendingPoints: 0,
+  gamePoints: 0,
+  gameMoves: 0,
+  currentBoard: null as Board | null,
+  distHistory: [] as number[][],
+  scoreHistory: [] as number[],
+  avgHistory: [] as number[],
+};
 
-let gamePoints = 0;
-let gameMoves = 0;
-let distHistory: number[][] = [];
-let scoreHistory: number[] = [];
-let avgHistory: number[] = [];
-const MAX_HISTORY = 20;
+const engine = new Engine({ rows: config.rows, cols: config.cols, gemTypes: config.gemTypes, seed: config.seed });
+gameState.currentBoard = engine.state.board;
 
 function getEl<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -103,9 +125,9 @@ function formatNumber(n: number): string {
 
 function updateBoardSizing(): void {
   const maxBoardWidth = Math.min(window.innerWidth - 32, 500);
-  const cellSize = Math.max(28, Math.floor(maxBoardWidth / COLS));
+  const cellSize = Math.max(28, Math.floor(maxBoardWidth / config.cols));
   const gemSize = cellSize - 8;
-  boardEl.style.setProperty('--grid-cols', String(COLS));
+  boardEl.style.setProperty('--grid-cols', String(config.cols));
   boardEl.style.setProperty('--cell-size', `${cellSize}px`);
   boardEl.style.setProperty('--gem-size', `${gemSize}px`);
 }
@@ -116,8 +138,8 @@ function createGrid(): void {
   gems.length = 0;
   updateBoardSizing();
 
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
+  for (let r = 0; r < config.rows; r++) {
+    for (let c = 0; c < config.cols; c++) {
       const cell = document.createElement('div');
       cell.className = 'cell';
       cell.tabIndex = 0;
@@ -144,10 +166,10 @@ function createGrid(): void {
 }
 
 function renderBoard(board: Board): void {
-  currentBoard = board;
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const idx = r * COLS + c;
+  gameState.currentBoard = board;
+  for (let r = 0; r < config.rows; r++) {
+    for (let c = 0; c < config.cols; c++) {
+      const idx = r * config.cols + c;
       const gemEl = gems[idx];
       const cell = board[r][c];
 
@@ -177,11 +199,11 @@ function renderBoard(board: Board): void {
         gemEl.classList.add('special-rainbow');
       }
 
-      if (selected && selected.r === r && selected.c === c) {
+      if (gameState.selected && gameState.selected.r === r && gameState.selected.c === c) {
         gemEl.classList.add('selected');
-      } else if (selected) {
-        const dr = Math.abs(selected.r - r);
-        const dc = Math.abs(selected.c - c);
+      } else if (gameState.selected) {
+        const dr = Math.abs(gameState.selected.r - r);
+        const dc = Math.abs(gameState.selected.c - c);
         if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
           gemEl.classList.add('swap-target');
         }
@@ -191,9 +213,9 @@ function renderBoard(board: Board): void {
 }
 
 function getGemDistribution(board: Board): number[] {
-  const counts = new Array(GEM_TYPES).fill(0);
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
+  const counts = new Array(config.gemTypes).fill(0);
+  for (let r = 0; r < config.rows; r++) {
+    for (let c = 0; c < config.cols; c++) {
       if (board[r][c]) counts[board[r][c]!.type]++;
     }
   }
@@ -244,45 +266,45 @@ function distBarHTML(dist: number[]): string {
 }
 
 function renderStats(): void {
-  distHistoryEl.innerHTML = distHistory.map(dist => distBarHTML(dist)).join('');
+  distHistoryEl.innerHTML = gameState.distHistory.map(dist => distBarHTML(dist)).join('');
 
-  renderSparkline(avgHistory, false);
+  renderSparkline(gameState.avgHistory, false);
 
-  scoreHistoryEl.innerHTML = scoreHistory.map(s => `<span>+${formatNumber(s)}</span>`).join('');
+  scoreHistoryEl.innerHTML = gameState.scoreHistory.map(s => `<span>+${formatNumber(s)}</span>`).join('');
 }
 
 function liveUpdateStats(board: Board): void {
-  if (pendingPoints > 0 && gameMoves >= 0) {
-    const projectedAvg = Math.round((gamePoints + pendingPoints) / (gameMoves + 1));
+  if (gameState.pendingPoints > 0 && gameState.gameMoves >= 0) {
+    const projectedAvg = Math.round((gameState.gamePoints + gameState.pendingPoints) / (gameState.gameMoves + 1));
     avgScoreEl.textContent = formatNumber(projectedAvg);
 
-    const liveHistory = [pendingPoints, ...scoreHistory.slice(0, 7)];
+    const liveHistory = [gameState.pendingPoints, ...gameState.scoreHistory.slice(0, 7)];
     scoreHistoryEl.innerHTML = liveHistory.map((s, i) =>
       `<span${i === 0 ? ' class="live"' : ''}>+${formatNumber(s)}</span>`
     ).join('');
 
-    const liveAvgHistory = [...avgHistory, projectedAvg];
+    const liveAvgHistory = [...gameState.avgHistory, projectedAvg];
     renderSparkline(liveAvgHistory, true);
   }
 
-  distHistoryEl.innerHTML = [...distHistory, getGemDistribution(board)].slice(-MAX_HISTORY).map(dist => distBarHTML(dist)).join('');
+  distHistoryEl.innerHTML = [...gameState.distHistory, getGemDistribution(board)].slice(-config.maxHistory).map(dist => distBarHTML(dist)).join('');
 }
 
 function recordMove(board: Board, points: number): void {
-  distHistory.push(getGemDistribution(board));
-  if (distHistory.length > MAX_HISTORY) distHistory.shift();
+  gameState.distHistory.push(getGemDistribution(board));
+  if (gameState.distHistory.length > config.maxHistory) gameState.distHistory.shift();
 
   if (points > 0) {
-    scoreHistory.unshift(points);
-    if (scoreHistory.length > 8) scoreHistory.pop();
+    gameState.scoreHistory.unshift(points);
+    if (gameState.scoreHistory.length > 8) gameState.scoreHistory.pop();
 
-    gamePoints += points;
-    gameMoves++;
-    const currentAvg = Math.round(gamePoints / gameMoves);
+    gameState.gamePoints += points;
+    gameState.gameMoves++;
+    const currentAvg = Math.round(gameState.gamePoints / gameState.gameMoves);
     avgScoreEl.textContent = formatNumber(currentAvg);
 
-    avgHistory.push(currentAvg);
-    if (avgHistory.length > MAX_HISTORY) avgHistory.shift();
+    gameState.avgHistory.push(currentAvg);
+    if (gameState.avgHistory.length > config.maxHistory) gameState.avgHistory.shift();
   }
 
   renderStats();
@@ -320,7 +342,7 @@ function showScorePopup(points: number, combo: number, positions: Pos[], isBonus
     const centroidR = positions.reduce((sum, p) => sum + p.r, 0) / positions.length;
     const centroidC = positions.reduce((sum, p) => sum + p.c, 0) / positions.length;
 
-    const idx = Math.round(centroidR) * COLS + Math.round(centroidC);
+    const idx = Math.round(centroidR) * config.cols + Math.round(centroidC);
     const cell = cells[Math.min(idx, cells.length - 1)];
     if (cell) {
       const rect = cell.getBoundingClientRect();
@@ -338,11 +360,11 @@ function showScorePopup(points: number, combo: number, positions: Pos[], isBonus
   }
 
   boardEl.appendChild(popup);
-  setTimeout(() => popup.remove(), 1000);
+  setTimeout(() => popup.remove(), config.timing.scorePopup);
 }
 
 function showExplosionEffect(r: number, c: number): void {
-  const idx = r * COLS + c;
+  const idx = r * config.cols + c;
   const cell = cells[idx];
   if (!cell) return;
 
@@ -365,7 +387,7 @@ function showLineEffect(effect: Effect): void {
   el.className = `line-effect ${effect.direction}`;
 
   if (effect.direction === 'horizontal' && effect.row !== undefined) {
-    const cell = cells[effect.row * COLS];
+    const cell = cells[effect.row * config.cols];
     if (cell) {
       const rect = cell.getBoundingClientRect();
       const boardRect = boardEl.getBoundingClientRect();
@@ -398,7 +420,7 @@ function showEffects(effects: Effect[]): void {
 
 function applyRemovalAnimations(positions: Pos[], animations: Record<string, RemovalAnim>): void {
   for (const pos of positions) {
-    const idx = pos.r * COLS + pos.c;
+    const idx = pos.r * config.cols + pos.c;
     const gemEl = gems[idx];
     if (!gemEl) continue;
     const key = `${pos.r},${pos.c}`;
@@ -409,14 +431,14 @@ function applyRemovalAnimations(positions: Pos[], animations: Record<string, Rem
 async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>, token: number): Promise<void> {
   if (!frame.moves || frame.moves.length === 0) {
     renderBoard(frame.board);
-    await sleep(500);
+    await sleep(config.timing.shufflePause);
     return;
   }
 
   // FLIP technique: record old positions, render new, animate from old -> new
   const oldRects = new Map<number, DOMRect>();
   for (const move of frame.moves) {
-    const idx = move.from.r * COLS + move.from.c;
+    const idx = move.from.r * config.cols + move.from.c;
     const cell = cells[idx];
     if (cell) oldRects.set(idx, cell.getBoundingClientRect());
   }
@@ -425,8 +447,8 @@ async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>, token:
 
   // Animate gems from old position to new
   for (const move of frame.moves) {
-    const newIdx = move.to.r * COLS + move.to.c;
-    const oldIdx = move.from.r * COLS + move.from.c;
+    const newIdx = move.to.r * config.cols + move.to.c;
+    const oldIdx = move.from.r * config.cols + move.from.c;
     const gemEl = gems[newIdx];
     const oldRect = oldRects.get(oldIdx);
     if (!gemEl || !oldRect) continue;
@@ -446,7 +468,7 @@ async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>, token:
 
   // Animate to final position with staggered timing
   for (const move of frame.moves) {
-    const newIdx = move.to.r * COLS + move.to.c;
+    const newIdx = move.to.r * config.cols + move.to.c;
     const gemEl = gems[newIdx];
     if (!gemEl) continue;
 
@@ -455,11 +477,11 @@ async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>, token:
     gemEl.style.transform = '';
   }
 
-  await sleep(700);
+  await sleep(config.timing.shuffleMove);
 
   // Cleanup inline styles
   for (const move of frame.moves) {
-    const newIdx = move.to.r * COLS + move.to.c;
+    const newIdx = move.to.r * config.cols + move.to.c;
     const gemEl = gems[newIdx];
     if (gemEl) {
       gemEl.style.transition = '';
@@ -470,23 +492,23 @@ async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>, token:
 
 async function playSubSteps(subSteps: RemovalSubStep[], token: number): Promise<void> {
   for (const step of subSteps) {
-    if (token !== runToken) return;
+    if (token !== gameState.runToken) return;
 
     // Show activation pulse on trigger gem
-    const triggerIdx = step.triggerPos.r * COLS + step.triggerPos.c;
+    const triggerIdx = step.triggerPos.r * config.cols + step.triggerPos.c;
     const triggerGem = gems[triggerIdx];
     if (triggerGem) triggerGem.classList.add('activating');
-    await sleep(150);
+    await sleep(config.timing.substepTrigger);
 
     // Show the effect
     for (const pos of step.positions) {
-      const idx = pos.r * COLS + pos.c;
+      const idx = pos.r * config.cols + pos.c;
       const gemEl = gems[idx];
       const key = `${pos.r},${pos.c}`;
       if (gemEl) gemEl.classList.add(step.animations[key] || 'matched');
     }
     showEffects(step.effects);
-    await sleep(300);
+    await sleep(config.timing.substepClear);
 
     if (triggerGem) triggerGem.classList.remove('activating');
   }
@@ -496,27 +518,27 @@ async function playFrames(frames: Frame[], token: number): Promise<void> {
   let sawShuffle = false;
 
   for (let i = 0; i < frames.length; i++) {
-    if (token !== runToken) return;
+    if (token !== gameState.runToken) return;
     const frame = frames[i];
 
     switch (frame.kind) {
       case 'swap':
         renderBoard(frame.board);
-        await sleep(200);
+        await sleep(config.timing.swap);
         break;
       case 'invalid':
         for (const pos of frame.positions) {
-          const idx = pos.r * COLS + pos.c;
+          const idx = pos.r * config.cols + pos.c;
           const gemEl = gems[idx];
           if (gemEl) gemEl.classList.add('invalid');
         }
-        await sleep(400);
+        await sleep(config.timing.invalid);
         break;
       case 'remove':
         showComboCounter(frame.score.combo);
         showScorePopup(frame.score.points, frame.score.combo, frame.positions, frame.score.isBonus);
-        pendingPoints += frame.score.points;
-        liveUpdateStats(currentBoard);
+        gameState.pendingPoints += frame.score.points;
+        liveUpdateStats(gameState.currentBoard!);
 
         // Phase 5B: If sub-steps exist, play them sequentially
         if (frame.subSteps && frame.subSteps.length > 0) {
@@ -530,13 +552,13 @@ async function playFrames(frames: Frame[], token: number): Promise<void> {
           // Only animate initially matched positions, not chain-reaction victims
           const initialPositions = frame.positions.filter(pos => !subStepKeys.has(`${pos.r},${pos.c}`));
           applyRemovalAnimations(initialPositions, frame.animations);
-          await sleep(300);
+          await sleep(config.timing.substepClear);
           // Then play special activation sequences (which animate blast victims)
           await playSubSteps(frame.subSteps, token);
         } else {
           applyRemovalAnimations(frame.positions, frame.animations);
           showEffects(frame.effects);
-          await sleep(400);
+          await sleep(config.timing.remove);
         }
         break;
       case 'board': {
@@ -544,40 +566,40 @@ async function playFrames(frames: Frame[], token: number): Promise<void> {
         // Phase 5E: Longer pause and animation when new specials appear
         if (frame.newSpecials && frame.newSpecials.length > 0) {
           for (const pos of frame.newSpecials) {
-            const idx = pos.r * COLS + pos.c;
+            const idx = pos.r * config.cols + pos.c;
             const gemEl = gems[idx];
             if (gemEl) gemEl.classList.add('just-created');
           }
-          await sleep(300);
+          await sleep(config.timing.specialCreated);
           for (const pos of frame.newSpecials) {
-            const idx = pos.r * COLS + pos.c;
+            const idx = pos.r * config.cols + pos.c;
             const gemEl = gems[idx];
             if (gemEl) gemEl.classList.remove('just-created');
           }
         } else {
-          await sleep(100);
+          await sleep(config.timing.boardSync);
         }
         break;
       }
       case 'drop':
         renderBoard(frame.board);
-        await sleep(250);
+        await sleep(config.timing.drop);
         break;
       case 'fill':
         renderBoard(frame.board);
-        await sleep(200);
+        await sleep(config.timing.fill);
         break;
       case 'preview':
         // Phase 5A: Trembling preview of pending matches
         renderBoard(frame.board);
         for (const pos of frame.pendingPositions) {
-          const idx = pos.r * COLS + pos.c;
+          const idx = pos.r * config.cols + pos.c;
           const gemEl = gems[idx];
           if (gemEl) gemEl.classList.add('pending-match');
         }
-        await sleep(400);
+        await sleep(config.timing.preview);
         for (const pos of frame.pendingPositions) {
-          const idx = pos.r * COLS + pos.c;
+          const idx = pos.r * config.cols + pos.c;
           const gemEl = gems[idx];
           if (gemEl) gemEl.classList.remove('pending-match');
         }
@@ -609,14 +631,14 @@ function hideFloatingMessage(): void {
 }
 
 function resetStats(): void {
-  gamePoints = 0;
-  gameMoves = 0;
-  pendingPoints = 0;
-  selected = null;
+  gameState.gamePoints = 0;
+  gameState.gameMoves = 0;
+  gameState.pendingPoints = 0;
+  gameState.selected = null;
   avgScoreEl.textContent = '0';
-  distHistory = [];
-  scoreHistory = [];
-  avgHistory = [];
+  gameState.distHistory = [];
+  gameState.scoreHistory = [];
+  gameState.avgHistory = [];
   comboCounterEl.classList.remove('show');
 }
 
@@ -624,34 +646,34 @@ function startNewGame(): void {
   const newUrl = new URL(window.location.toString());
   let needsGridRebuild = false;
 
-  if (pendingGemTypes !== GEM_TYPES) {
-    GEM_TYPES = pendingGemTypes;
-    if (GEM_TYPES === 5) {
+  if (config.pendingGemTypes !== config.gemTypes) {
+    config.gemTypes = config.pendingGemTypes;
+    if (config.gemTypes === 5) {
       newUrl.searchParams.delete('gems');
     } else {
-      newUrl.searchParams.set('gems', GEM_TYPES.toString());
+      newUrl.searchParams.set('gems', config.gemTypes.toString());
     }
   }
 
-  if (pendingGridSize !== GRID_SIZE) {
-    GRID_SIZE = pendingGridSize;
-    ROWS = GRID_SIZE;
-    COLS = GRID_SIZE;
+  if (config.pendingGridSize !== config.gridSize) {
+    config.gridSize = config.pendingGridSize;
+    config.rows = config.gridSize;
+    config.cols = config.gridSize;
     needsGridRebuild = true;
-    if (GRID_SIZE === 8) {
+    if (config.gridSize === 8) {
       newUrl.searchParams.delete('grid');
     } else {
-      newUrl.searchParams.set('grid', GRID_SIZE.toString());
+      newUrl.searchParams.set('grid', config.gridSize.toString());
     }
   }
 
   history.replaceState({}, '', newUrl);
 
-  if (!seedLocked) {
-    seed = Date.now();
+  if (!config.seedLocked) {
+    config.seed = Date.now();
   }
 
-  engine.reset({ rows: ROWS, cols: COLS, gemTypes: GEM_TYPES, seed });
+  engine.reset({ rows: config.rows, cols: config.cols, gemTypes: config.gemTypes, seed: config.seed });
 
   if (needsGridRebuild) {
     createGrid();
@@ -660,32 +682,32 @@ function startNewGame(): void {
   const board = engine.init();
   resetStats();
   renderBoard(board);
-  distHistory = [getGemDistribution(board)];
+  gameState.distHistory = [getGemDistribution(board)];
   renderStats();
   hideFloatingMessage();
 }
 
 async function trySwap(pos1: Pos, pos2: Pos): Promise<void> {
-  if (isProcessing) return;
+  if (gameState.isProcessing) return;
 
-  isProcessing = true;
+  gameState.isProcessing = true;
   boardEl.classList.add('processing');
-  pendingPoints = 0;
-  const localToken = ++runToken;
+  gameState.pendingPoints = 0;
+  const localToken = ++gameState.runToken;
 
   const result = engine.swap(pos1, pos2);
   await playFrames(result.frames, localToken);
 
-  if (localToken !== runToken) return;
+  if (localToken !== gameState.runToken) return;
 
-  isProcessing = false;
+  gameState.isProcessing = false;
   boardEl.classList.remove('processing');
   recordMove(engine.state.board, result.pointsEarned);
-  pendingPoints = 0;
+  gameState.pendingPoints = 0;
 
   setTimeout(() => {
     comboCounterEl.classList.remove('show');
-  }, 500);
+  }, config.timing.comboHide);
 }
 
 function isAdjacent(a: Pos, b: Pos): boolean {
@@ -701,7 +723,7 @@ const dragThreshold = 16;
 const dragTimeGate = 120;
 
 boardEl.addEventListener('pointerdown', (event: PointerEvent) => {
-  if (isProcessing) return;
+  if (gameState.isProcessing) return;
   const target = event.target as HTMLElement | null;
   const cell = target?.closest('.cell') as HTMLDivElement | null;
   if (!cell) return;
@@ -716,7 +738,7 @@ boardEl.addEventListener('pointerdown', (event: PointerEvent) => {
 });
 
 boardEl.addEventListener('pointermove', (event: PointerEvent) => {
-  if (!pointerStart || isProcessing) return;
+  if (!pointerStart || gameState.isProcessing) return;
   if (pointerId !== event.pointerId) return;
 
   const dx = event.clientX - pointerStart.x;
@@ -733,13 +755,13 @@ boardEl.addEventListener('pointermove', (event: PointerEvent) => {
     c: start.c + (horizontal ? (dx > 0 ? 1 : -1) : 0)
   };
 
-  if (target.r < 0 || target.r >= ROWS || target.c < 0 || target.c >= COLS) {
+  if (target.r < 0 || target.r >= config.rows || target.c < 0 || target.c >= config.cols) {
     return;
   }
 
   dragTriggered = true;
-  selected = null;
-  renderBoard(currentBoard);
+  gameState.selected = null;
+  renderBoard(gameState.currentBoard!);
   void trySwap(start, target);
 });
 
@@ -754,7 +776,7 @@ boardEl.addEventListener('pointerup', (event: PointerEvent) => {
     return;
   }
 
-  if (isProcessing) {
+  if (gameState.isProcessing) {
     pointerStart = null;
     return;
   }
@@ -762,22 +784,22 @@ boardEl.addEventListener('pointerup', (event: PointerEvent) => {
   const start = pointerStart.pos;
   pointerStart = null;
 
-  if (selected && selected.r === start.r && selected.c === start.c) {
-    selected = null;
-    renderBoard(currentBoard);
+  if (gameState.selected && gameState.selected.r === start.r && gameState.selected.c === start.c) {
+    gameState.selected = null;
+    renderBoard(gameState.currentBoard!);
     return;
   }
 
-  if (selected && isAdjacent(selected, start)) {
-    const from = selected;
-    selected = null;
-    renderBoard(currentBoard);
+  if (gameState.selected && isAdjacent(gameState.selected, start)) {
+    const from = gameState.selected;
+    gameState.selected = null;
+    renderBoard(gameState.currentBoard!);
     void trySwap(from, start);
     return;
   }
 
-  selected = start;
-  renderBoard(currentBoard);
+  gameState.selected = start;
+  renderBoard(gameState.currentBoard!);
 });
 
 boardEl.addEventListener('pointercancel', (event: PointerEvent) => {
@@ -789,23 +811,23 @@ boardEl.addEventListener('pointercancel', (event: PointerEvent) => {
 });
 
 newGameBtn.addEventListener('click', () => {
-  if (isProcessing) {
-    runToken++;
-    isProcessing = false;
+  if (gameState.isProcessing) {
+    gameState.runToken++;
+    gameState.isProcessing = false;
     setTimeout(startNewGame, 100);
     return;
   }
   startNewGame();
 });
 
-gemSlider.value = GEM_TYPES.toString();
-gemSliderValue.textContent = GEM_TYPES.toString();
-gridSlider.value = GRID_SIZE.toString();
-gridSliderValue.textContent = `${GRID_SIZE}x${GRID_SIZE}`;
+gemSlider.value = config.gemTypes.toString();
+gemSliderValue.textContent = config.gemTypes.toString();
+gridSlider.value = config.gridSize.toString();
+gridSliderValue.textContent = `${config.gridSize}x${config.gridSize}`;
 let floatingMessageTimeout: number | undefined;
 
 function showSliderChangeMessage(): void {
-  if (pendingGemTypes !== GEM_TYPES || pendingGridSize !== GRID_SIZE) {
+  if (config.pendingGemTypes !== config.gemTypes || config.pendingGridSize !== config.gridSize) {
     showFloatingMessage('New Game to apply');
     if (floatingMessageTimeout) window.clearTimeout(floatingMessageTimeout);
     floatingMessageTimeout = window.setTimeout(hideFloatingMessage, 3000);
@@ -817,14 +839,14 @@ function showSliderChangeMessage(): void {
 gemSlider.addEventListener('input', () => {
   const newValue = parseInt(gemSlider.value, 10);
   gemSliderValue.textContent = newValue.toString();
-  pendingGemTypes = newValue;
+  config.pendingGemTypes = newValue;
   showSliderChangeMessage();
 });
 
 gridSlider.addEventListener('input', () => {
   const newValue = parseInt(gridSlider.value, 10);
   gridSliderValue.textContent = `${newValue}x${newValue}`;
-  pendingGridSize = newValue;
+  config.pendingGridSize = newValue;
   showSliderChangeMessage();
 });
 
