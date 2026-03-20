@@ -80,6 +80,16 @@ const gemColors = [
   '#ff6b9d'
 ];
 
+let activeGemColors = [...gemColors];
+
+function refreshGemColors(): void {
+  const style = getComputedStyle(document.documentElement);
+  for (let i = 0; i < 10; i++) {
+    const val = style.getPropertyValue(`--gem-color-${i}`).trim();
+    if (val) activeGemColors[i] = val;
+  }
+}
+
 const compactFormatter = new Intl.NumberFormat(undefined, {
   notation: 'compact',
   maximumFractionDigits: 1
@@ -116,6 +126,11 @@ function createGrid(): void {
 
       const gem = document.createElement('div');
       gem.className = 'gem empty';
+
+      const shape = document.createElement('span');
+      shape.className = 'gem-shape';
+      gem.appendChild(shape);
+
       cell.appendChild(gem);
 
       boardEl.appendChild(cell);
@@ -123,6 +138,9 @@ function createGrid(): void {
       gems.push(gem);
     }
   }
+
+  // Re-append overlay elements that live inside the board
+  boardEl.appendChild(comboCounterEl);
 }
 
 function renderBoard(board: Board): void {
@@ -133,12 +151,22 @@ function renderBoard(board: Board): void {
       const gemEl = gems[idx];
       const cell = board[r][c];
 
+      const shapeEl = gemEl.querySelector('.gem-shape') as HTMLElement;
+
       if (!cell) {
         gemEl.className = 'gem empty';
+        if (shapeEl) {
+          shapeEl.className = 'gem-shape';
+          gemEl.appendChild(shapeEl);
+        }
         continue;
       }
 
       gemEl.className = `gem gem-${cell.type}`;
+      if (shapeEl) {
+        shapeEl.className = `gem-shape shape-${cell.type}`;
+        gemEl.appendChild(shapeEl);
+      }
 
       if (cell.special === SPECIAL.BOMB) {
         gemEl.classList.add('special-bomb');
@@ -211,7 +239,7 @@ function renderSparkline(history: number[], isLive = false): void {
 function distBarHTML(dist: number[]): string {
   const total = dist.reduce((a, b) => a + b, 0) || 1;
   return `<div class="dist-bar">${dist.map((count, i) =>
-    `<div class="dist-segment" style="height:${(count / total) * 24}px;background:${gemColors[i]}"></div>`
+    `<div class="dist-segment" style="height:${(count / total) * 24}px;background:${activeGemColors[i]}"></div>`
   ).join('')}</div>`;
 }
 
@@ -806,5 +834,25 @@ function sleep(ms: number): Promise<void> {
 
 window.addEventListener('resize', () => { updateBoardSizing(); });
 
+function showOnboarding(): void {
+  if (localStorage.getItem('zen-match-visited')) return;
+
+  const tip = document.createElement('div');
+  tip.className = 'onboarding-tip';
+  tip.textContent = 'Swap adjacent gems to match 3 or more';
+  boardEl.appendChild(tip);
+
+  const dismiss = () => {
+    tip.remove();
+    localStorage.setItem('zen-match-visited', '1');
+    document.removeEventListener('pointerdown', dismiss);
+  };
+
+  // Dismiss on any tap after a short delay
+  setTimeout(() => document.addEventListener('pointerdown', dismiss), 500);
+}
+
+refreshGemColors();
 createGrid();
 startNewGame();
+showOnboarding();

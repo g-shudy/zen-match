@@ -1,3 +1,26 @@
+:root {
+  --gem-color-0: #7ec8e3;
+  --gem-color-0-dark: #5ba3c0;
+  --gem-color-1: #e07a5f;
+  --gem-color-1-dark: #c0634b;
+  --gem-color-2: #95d5b2;
+  --gem-color-2-dark: #74b893;
+  --gem-color-3: #f4d35e;
+  --gem-color-3-dark: #d4b34e;
+  --gem-color-4: #dda0dd;
+  --gem-color-4-dark: #b87db8;
+  --gem-color-5: #e8a87c;
+  --gem-color-5-dark: #c38d6e;
+  --gem-color-6: #4ecdc4;
+  --gem-color-6-dark: #3ba89f;
+  --gem-color-7: #ff9f43;
+  --gem-color-7-dark: #d98436;
+  --gem-color-8: #5f6caf;
+  --gem-color-8-dark: #4a5590;
+  --gem-color-9: #ff6b9d;
+  --gem-color-9-dark: #d9577f;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -411,16 +434,36 @@ h1 {
   100% { transform: scale(1); opacity: 1; }
 }
 
-.gem-0 { background: linear-gradient(135deg, #7ec8e3 0%, #5ba3c0 100%); color: #7ec8e3; }
-.gem-1 { background: linear-gradient(135deg, #e07a5f 0%, #c0634b 100%); color: #e07a5f; }
-.gem-2 { background: linear-gradient(135deg, #95d5b2 0%, #74b893 100%); color: #95d5b2; }
-.gem-3 { background: linear-gradient(135deg, #f4d35e 0%, #d4b34e 100%); color: #f4d35e; }
-.gem-4 { background: linear-gradient(135deg, #dda0dd 0%, #b87db8 100%); color: #dda0dd; }
-.gem-5 { background: linear-gradient(135deg, #e8a87c 0%, #c38d6e 100%); color: #e8a87c; }
-.gem-6 { background: linear-gradient(135deg, #4ecdc4 0%, #3ba89f 100%); color: #4ecdc4; }
-.gem-7 { background: linear-gradient(135deg, #ff9f43 0%, #d98436 100%); color: #ff9f43; }
-.gem-8 { background: linear-gradient(135deg, #5f6caf 0%, #4a5590 100%); color: #5f6caf; }
-.gem-9 { background: linear-gradient(135deg, #ff6b9d 0%, #d9577f 100%); color: #ff6b9d; }
+.gem-0 { background: linear-gradient(135deg, var(--gem-color-0) 0%, var(--gem-color-0-dark) 100%); color: var(--gem-color-0); }
+.gem-1 { background: linear-gradient(135deg, var(--gem-color-1) 0%, var(--gem-color-1-dark) 100%); color: var(--gem-color-1); }
+.gem-2 { background: linear-gradient(135deg, var(--gem-color-2) 0%, var(--gem-color-2-dark) 100%); color: var(--gem-color-2); }
+.gem-3 { background: linear-gradient(135deg, var(--gem-color-3) 0%, var(--gem-color-3-dark) 100%); color: var(--gem-color-3); }
+.gem-4 { background: linear-gradient(135deg, var(--gem-color-4) 0%, var(--gem-color-4-dark) 100%); color: var(--gem-color-4); }
+.gem-5 { background: linear-gradient(135deg, var(--gem-color-5) 0%, var(--gem-color-5-dark) 100%); color: var(--gem-color-5); }
+.gem-6 { background: linear-gradient(135deg, var(--gem-color-6) 0%, var(--gem-color-6-dark) 100%); color: var(--gem-color-6); }
+.gem-7 { background: linear-gradient(135deg, var(--gem-color-7) 0%, var(--gem-color-7-dark) 100%); color: var(--gem-color-7); }
+.gem-8 { background: linear-gradient(135deg, var(--gem-color-8) 0%, var(--gem-color-8-dark) 100%); color: var(--gem-color-8); }
+.gem-9 { background: linear-gradient(135deg, var(--gem-color-9) 0%, var(--gem-color-9-dark) 100%); color: var(--gem-color-9); }
+
+/* Gem shapes - always on for accessibility */
+.gem-shape {
+  position: absolute;
+  inset: 20%;
+  background: rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.shape-0 { border-radius: 50%; }
+.shape-1 { transform: rotate(45deg); inset: 25%; }
+.shape-2 { clip-path: polygon(50% 10%, 10% 90%, 90% 90%); }
+.shape-3 { border-radius: 2px; }
+.shape-4 { clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+.shape-5 { clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0% 50%); }
+.shape-6 { clip-path: polygon(35% 0%, 65% 0%, 65% 35%, 100% 35%, 100% 65%, 65% 65%, 65% 100%, 35% 100%, 35% 65%, 0% 65%, 0% 35%, 35% 35%); }
+.shape-7 { clip-path: polygon(50% 90%, 15% 55%, 15% 35%, 30% 15%, 50% 30%, 70% 15%, 85% 35%, 85% 55%); inset: 15%; }
+.shape-8 { border-radius: 50%; width: 55%; height: 55%; inset: auto; top: 20%; left: 20%; box-shadow: 8px -4px 0 0 rgba(255, 255, 255, 0.2); background: transparent; }
+.shape-9 { clip-path: polygon(50% 5%, 85% 50%, 50% 95%, 15% 50%); }
 
 .gem.special-bomb {
   border-radius: 50%;
@@ -579,47 +622,48 @@ h1 {
 }
 
 .combo-counter {
-  position: fixed;
-  top: calc(20px + env(safe-area-inset-top, 0px));
-  right: calc(20px + env(safe-area-inset-right, 0px));
-  font-size: 1.5rem;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  font-size: 3rem;
   font-weight: 400;
   color: #f4d35e;
   opacity: 0;
-  transform: scale(0.8);
   transition: all 0.3s ease;
   text-shadow: 0 0 15px rgba(244, 211, 94, 0.4);
   pointer-events: none;
+  z-index: 5;
 }
 
 .combo-counter.show {
-  opacity: 1;
-  transform: scale(1);
+  opacity: 0.3;
+  transform: translate(-50%, -50%) scale(1);
 }
 
 .combo-counter.warm {
   color: #e8a87c;
-  font-size: 1.7rem;
+  opacity: 0.35;
   text-shadow: 0 0 20px rgba(232, 168, 124, 0.5);
 }
 
 .combo-counter.hot {
   color: #e07a5f;
-  font-size: 1.9rem;
+  opacity: 0.4;
   text-shadow: 0 0 25px rgba(224, 122, 95, 0.6);
 }
 
 .combo-counter.epic {
   color: #ff6b9d;
-  font-size: 2.2rem;
+  opacity: 0.5;
   text-shadow: 0 0 30px rgba(255, 107, 157, 0.7);
   animation: comboEpic 0.5s ease-in-out;
 }
 
 @keyframes comboEpic {
-  0% { transform: scale(1.5); }
-  50% { transform: scale(1.8); }
-  100% { transform: scale(1); }
+  0% { transform: translate(-50%, -50%) scale(1.5); }
+  50% { transform: translate(-50%, -50%) scale(1.8); }
+  100% { transform: translate(-50%, -50%) scale(1); }
 }
 
 .board.combo-flash {
@@ -968,4 +1012,28 @@ h1 {
     animation: none;
     filter: brightness(1.2);
   }
+}
+
+.onboarding-tip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(15, 20, 40, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #a8c0c8;
+  padding: 16px 24px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  z-index: 50;
+  animation: tipFade 0.5s ease-out;
+}
+
+@keyframes tipFade {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
