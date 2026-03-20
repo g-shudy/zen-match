@@ -71,6 +71,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 20px;
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 h1 {
@@ -87,6 +88,10 @@ h1 {
   gap: 16px;
   align-items: center;
   margin-bottom: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0 16px;
+  max-width: 100%;
 }
 
 .avg-display {
@@ -104,7 +109,7 @@ h1 {
 
 .gem-slider {
   width: 80px;
-  height: 4px;
+  height: 8px;
   -webkit-appearance: none;
   appearance: none;
   background: rgba(255, 255, 255, 0.15);
@@ -116,8 +121,8 @@ h1 {
 .gem-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 28px;
+  height: 28px;
   background: #7a9ea8;
   border-radius: 50%;
   cursor: pointer;
@@ -129,8 +134,8 @@ h1 {
 }
 
 .gem-slider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+  width: 28px;
+  height: 28px;
   background: #7a9ea8;
   border: none;
   border-radius: 50%;
@@ -554,8 +559,8 @@ h1 {
 
 .combo-counter {
   position: fixed;
-  top: 20px;
-  right: 20px;
+  top: calc(20px + env(safe-area-inset-top, 0px));
+  right: calc(20px + env(safe-area-inset-right, 0px));
   font-size: 1.5rem;
   font-weight: 400;
   color: #f4d35e;
@@ -660,8 +665,8 @@ h1 {
 
 .version-tag {
   position: fixed;
-  bottom: 12px;
-  left: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  left: calc(12px + env(safe-area-inset-left, 0px));
   font-size: 0.65rem;
   color: #4a6a74;
   letter-spacing: 0.08em;
@@ -676,8 +681,8 @@ h1 {
 
 .back-link {
   position: fixed;
-  top: 20px;
-  left: 20px;
+  top: calc(20px + env(safe-area-inset-top, 0px));
+  left: calc(20px + env(safe-area-inset-left, 0px));
   color: #5a7a84;
   text-decoration: none;
   font-size: 0.9rem;
@@ -787,6 +792,7 @@ h1 {
   gap: 8px;
   width: 100%;
   padding: 10px 20px;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   background: rgba(15, 20, 40, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -886,6 +892,17 @@ h1 {
 .help-col strong {
   color: #c5d5db;
   font-weight: 500;
+}
+
+@media (max-width: 480px) {
+  .controls-row {
+    gap: 8px 12px;
+  }
+
+  .board {
+    padding: 8px;
+    gap: 2px;
+  }
 }
 
 @media (max-width: 640px) {

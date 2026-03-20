@@ -92,7 +92,8 @@ function formatNumber(n: number): string {
 }
 
 function updateBoardSizing(): void {
-  const cellSize = Math.max(20, Math.floor(400 / COLS));
+  const maxBoardWidth = Math.min(window.innerWidth - 32, 500);
+  const cellSize = Math.max(28, Math.floor(maxBoardWidth / COLS));
   const gemSize = cellSize - 8;
   boardEl.style.setProperty('--grid-cols', String(COLS));
   boardEl.style.setProperty('--cell-size', `${cellSize}px`);
@@ -801,6 +802,8 @@ gridSlider.addEventListener('input', () => {
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+window.addEventListener('resize', () => { updateBoardSizing(); });
 
 createGrid();
 startNewGame();
