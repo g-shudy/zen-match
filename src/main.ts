@@ -44,19 +44,25 @@ let scoreHistory: number[] = [];
 let avgHistory: number[] = [];
 const MAX_HISTORY = 20;
 
-const boardEl = document.getElementById('board') as HTMLDivElement;
-const avgScoreEl = document.getElementById('avgScore') as HTMLSpanElement;
-const scoreHistoryEl = document.getElementById('scoreHistory') as HTMLDivElement;
-const comboCounterEl = document.getElementById('comboCounter') as HTMLDivElement;
-const shuffleNotice = document.getElementById('shuffleNotice') as HTMLDivElement;
-const distHistoryEl = document.getElementById('distHistory') as HTMLDivElement;
-const avgSparklineEl = document.getElementById('avgSparkline') as HTMLCanvasElement;
-const newGameBtn = document.getElementById('newGame') as HTMLButtonElement;
-const gemSlider = document.getElementById('gemSlider') as HTMLInputElement;
-const gemSliderValue = document.getElementById('gemSliderValue') as HTMLSpanElement;
-const gridSlider = document.getElementById('gridSlider') as HTMLInputElement;
-const gridSliderValue = document.getElementById('gridSliderValue') as HTMLSpanElement;
-const floatingMessage = document.getElementById('floatingMessage') as HTMLDivElement;
+function getEl<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`Element #${id} not found`);
+  return el as T;
+}
+
+const boardEl = getEl<HTMLDivElement>('board');
+const avgScoreEl = getEl<HTMLSpanElement>('avgScore');
+const scoreHistoryEl = getEl<HTMLDivElement>('scoreHistory');
+const comboCounterEl = getEl<HTMLDivElement>('comboCounter');
+const shuffleNotice = getEl<HTMLDivElement>('shuffleNotice');
+const distHistoryEl = getEl<HTMLDivElement>('distHistory');
+const avgSparklineEl = getEl<HTMLCanvasElement>('avgSparkline');
+const newGameBtn = getEl<HTMLButtonElement>('newGame');
+const gemSlider = getEl<HTMLInputElement>('gemSlider');
+const gemSliderValue = getEl<HTMLSpanElement>('gemSliderValue');
+const gridSlider = getEl<HTMLInputElement>('gridSlider');
+const gridSliderValue = getEl<HTMLSpanElement>('gridSliderValue');
+const floatingMessage = getEl<HTMLDivElement>('floatingMessage');
 
 const cells: HTMLDivElement[] = [];
 const gems: HTMLDivElement[] = [];
@@ -200,13 +206,15 @@ function renderSparkline(history: number[], isLive = false): void {
   }
 }
 
+function distBarHTML(dist: number[]): string {
+  const total = dist.reduce((a, b) => a + b, 0) || 1;
+  return `<div class="dist-bar">${dist.map((count, i) =>
+    `<div class="dist-segment" style="height:${(count / total) * 24}px;background:${gemColors[i]}"></div>`
+  ).join('')}</div>`;
+}
+
 function renderStats(): void {
-  distHistoryEl.innerHTML = distHistory.map(dist => {
-    const total = dist.reduce((a, b) => a + b, 0) || 1;
-    return `<div class="dist-bar">${dist.map((count, i) =>
-      `<div class="dist-segment" style="height:${(count / total) * 24}px;background:${gemColors[i]}"></div>`
-    ).join('')}</div>`;
-  }).join('');
+  distHistoryEl.innerHTML = distHistory.map(dist => distBarHTML(dist)).join('');
 
   renderSparkline(avgHistory, false);
 
@@ -227,12 +235,7 @@ function liveUpdateStats(board: Board): void {
     renderSparkline(liveAvgHistory, true);
   }
 
-  distHistoryEl.innerHTML = [...distHistory, getGemDistribution(board)].slice(-MAX_HISTORY).map(dist => {
-    const total = dist.reduce((a, b) => a + b, 0) || 1;
-    return `<div class="dist-bar">${dist.map((count, i) =>
-      `<div class="dist-segment" style="height:${(count / total) * 24}px;background:${gemColors[i]}"></div>`
-    ).join('')}</div>`;
-  }).join('');
+  distHistoryEl.innerHTML = [...distHistory, getGemDistribution(board)].slice(-MAX_HISTORY).map(dist => distBarHTML(dist)).join('');
 }
 
 function recordMove(board: Board, points: number): void {
@@ -353,6 +356,16 @@ function showLineEffect(effect: Effect): void {
   setTimeout(() => el.remove(), 400);
 }
 
+function showEffects(effects: Effect[]): void {
+  for (const effect of effects) {
+    if (effect.kind === 'explosion') {
+      showExplosionEffect(effect.r, effect.c);
+    } else {
+      showLineEffect(effect);
+    }
+  }
+}
+
 function applyRemovalAnimations(positions: Pos[], animations: Record<string, RemovalAnim>): void {
   for (const pos of positions) {
     const idx = pos.r * COLS + pos.c;
@@ -442,13 +455,7 @@ async function playSubSteps(subSteps: RemovalSubStep[], token: number): Promise<
       const key = `${pos.r},${pos.c}`;
       if (gemEl) gemEl.classList.add(step.animations[key] || 'matched');
     }
-    step.effects.forEach(effect => {
-      if (effect.kind === 'explosion') {
-        showExplosionEffect(effect.r, effect.c);
-      } else {
-        showLineEffect(effect);
-      }
-    });
+    showEffects(step.effects);
     await sleep(300);
 
     if (triggerGem) triggerGem.classList.remove('activating');
@@ -498,13 +505,7 @@ async function playFrames(frames: Frame[], token: number): Promise<void> {
           await playSubSteps(frame.subSteps, token);
         } else {
           applyRemovalAnimations(frame.positions, frame.animations);
-          frame.effects.forEach(effect => {
-            if (effect.kind === 'explosion') {
-              showExplosionEffect(effect.r, effect.c);
-            } else {
-              showLineEffect(effect);
-            }
-          });
+          showEffects(frame.effects);
           await sleep(400);
         }
         break;
