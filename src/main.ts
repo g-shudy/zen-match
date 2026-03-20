@@ -65,6 +65,9 @@ const gameState = {
 const engine = new Engine({ rows: config.rows, cols: config.cols, gemTypes: config.gemTypes, seed: config.seed });
 gameState.currentBoard = engine.state.board;
 
+// T44: Session start time for zen mode hue shift
+let sessionStart = Date.now();
+
 function getEl<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`Element #${id} not found`);
@@ -88,6 +91,7 @@ const floatingMessage = getEl<HTMLDivElement>('floatingMessage');
 const paletteSelect = getEl<HTMLSelectElement>('paletteSelect');
 const settingsBtn = getEl<HTMLButtonElement>('settingsBtn');
 const settingsPanel = getEl<HTMLDivElement>('settingsPanel');
+const modeToggle = getEl<HTMLInputElement>('modeToggle');
 
 const cells: HTMLDivElement[] = [];
 const gems: HTMLDivElement[] = [];
@@ -312,8 +316,14 @@ function showComboCounter(combo: number): void {
     comboCounterEl.className = 'combo-counter show';
     if (combo >= 5) {
       comboCounterEl.classList.add('epic');
-      boardEl.classList.add('combo-flash');
-      setTimeout(() => boardEl.classList.remove('combo-flash'), 600);
+      if (document.body.dataset.mode !== 'zen') {
+        boardEl.classList.add('combo-flash');
+        setTimeout(() => boardEl.classList.remove('combo-flash'), 600);
+      } else {
+        // Zen mode: ambient orbs respond
+        document.querySelector('.ambient')?.classList.add('combo-response');
+        setTimeout(() => document.querySelector('.ambient')?.classList.remove('combo-response'), 1200);
+      }
     } else if (combo >= 4) {
       comboCounterEl.classList.add('hot');
     } else if (combo >= 3) {
@@ -414,13 +424,44 @@ function showEffects(effects: Effect[]): void {
   }
 }
 
+let activeParticles = 0;
+const MAX_PARTICLES = 20;
+
+function spawnParticles(r: number, c: number, color: string, count = 6): void {
+  const idx = posIdx(r, c);
+  const cell = cells[idx];
+  if (!cell) return;
+  const rect = cell.getBoundingClientRect();
+  const boardRect = boardEl.getBoundingClientRect();
+  const cx = rect.left - boardRect.left + rect.width / 2;
+  const cy = rect.top - boardRect.top + rect.height / 2;
+
+  for (let i = 0; i < count && activeParticles < MAX_PARTICLES; i++) {
+    activeParticles++;
+    const p = document.createElement('div');
+    const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
+    const dist = 20 + Math.random() * 30;
+    const tx = Math.cos(angle) * dist;
+    const ty = Math.sin(angle) * dist;
+    p.className = 'particle';
+    p.style.cssText = `left:${cx}px;top:${cy}px;background:${color};--tx:${tx}px;--ty:${ty}px;`;
+    boardEl.appendChild(p);
+    p.addEventListener('animationend', () => { p.remove(); activeParticles--; }, { once: true });
+  }
+}
+
 function applyRemovalAnimations(positions: Pos[], animations: Record<string, RemovalAnim>): void {
   for (const pos of positions) {
-    const idx = pos.r * config.cols + pos.c;
+    const idx = posIdx(pos.r, pos.c);
     const gemEl = gems[idx];
     if (!gemEl) continue;
     const key = `${pos.r},${pos.c}`;
     gemEl.classList.add(animations[key] || 'matched');
+    // Spawn particles matching the gem's color
+    const cell = gameState.currentBoard?.[pos.r]?.[pos.c];
+    if (cell) {
+      spawnParticles(pos.r, pos.c, activeGemColors[cell.type] || '#fff', 4);
+    }
   }
 }
 
@@ -486,7 +527,7 @@ async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>, token:
   }
 }
 
-async function playSubSteps(subSteps: RemovalSubStep[], token: number): Promise<void> {
+async function playSubSteps(subSteps: RemovalSubStep[], token: number, cascadeSpeed = 1): Promise<void> {
   for (const step of subSteps) {
     if (token !== gameState.runToken) return;
 
@@ -494,7 +535,7 @@ async function playSubSteps(subSteps: RemovalSubStep[], token: number): Promise<
     const triggerIdx = step.triggerPos.r * config.cols + step.triggerPos.c;
     const triggerGem = gems[triggerIdx];
     if (triggerGem) triggerGem.classList.add('activating');
-    await sleep(config.timing.substepTrigger);
+    await sleep(config.timing.substepTrigger * cascadeSpeed);
 
     // Show the effect
     for (const pos of step.positions) {
@@ -504,7 +545,7 @@ async function playSubSteps(subSteps: RemovalSubStep[], token: number): Promise<
       if (gemEl) gemEl.classList.add(step.animations[key] || 'matched');
     }
     showEffects(step.effects);
-    await sleep(config.timing.substepClear);
+    await sleep(config.timing.substepClear * cascadeSpeed);
 
     if (triggerGem) triggerGem.classList.remove('activating');
   }
@@ -522,15 +563,39 @@ async function playFrames(frames: Frame[], token: number): Promise<void> {
         renderBoard(frame.board);
         await sleep(config.timing.swap);
         break;
-      case 'invalid':
+      case 'invalid': {
+        // Determine slide direction from the two positions
+        const p1 = frame.positions[0];
+        const p2 = frame.positions[1];
+        const dr = p2.r - p1.r;
+        const dc = p2.c - p1.c;
+
         for (const pos of frame.positions) {
-          const idx = pos.r * config.cols + pos.c;
+          const idx = posIdx(pos.r, pos.c);
           const gemEl = gems[idx];
-          if (gemEl) gemEl.classList.add('invalid');
+          if (gemEl) {
+            // First gem slides toward second, second slides toward first
+            const isFirst = pos.r === p1.r && pos.c === p1.c;
+            const slideR = isFirst ? dr : -dr;
+            const slideC = isFirst ? dc : -dc;
+            gemEl.style.setProperty('--slide-x', `${slideC * 12}px`);
+            gemEl.style.setProperty('--slide-y', `${slideR * 12}px`);
+            gemEl.classList.add('invalid');
+          }
         }
         await sleep(config.timing.invalid);
         break;
-      case 'remove':
+      }
+      case 'remove': {
+        let cascadeSpeed: number;
+        if (document.body.dataset.mode === 'zen') {
+          // Zen: decelerate (each step slower), 350ms base, +8% per combo, cap 500ms
+          const zenBase = 350;
+          cascadeSpeed = Math.min(500, zenBase * Math.pow(1.08, frame.score.combo - 1)) / config.timing.remove;
+        } else {
+          // Classic: accelerate (each step faster)
+          cascadeSpeed = Math.max(0.6, Math.pow(0.92, frame.score.combo - 1));
+        }
         showComboCounter(frame.score.combo);
         showScorePopup(frame.score.points, frame.score.combo, frame.positions, frame.score.isBonus);
         gameState.pendingPoints += frame.score.points;
@@ -548,15 +613,16 @@ async function playFrames(frames: Frame[], token: number): Promise<void> {
           // Only animate initially matched positions, not chain-reaction victims
           const initialPositions = frame.positions.filter(pos => !subStepKeys.has(`${pos.r},${pos.c}`));
           applyRemovalAnimations(initialPositions, frame.animations);
-          await sleep(config.timing.substepClear);
+          await sleep(config.timing.substepClear * cascadeSpeed);
           // Then play special activation sequences (which animate blast victims)
-          await playSubSteps(frame.subSteps, token);
+          await playSubSteps(frame.subSteps, token, cascadeSpeed);
         } else {
           applyRemovalAnimations(frame.positions, frame.animations);
           showEffects(frame.effects);
-          await sleep(config.timing.remove);
+          await sleep(config.timing.remove * cascadeSpeed);
         }
         break;
+      }
       case 'board': {
         renderBoard(frame.board);
         // Phase 5E: Longer pause and animation when new specials appear
@@ -682,6 +748,8 @@ function startNewGame(): void {
   renderStats();
   hideFloatingMessage();
   resetHintTimer();
+  // Reset session timer for zen mode hue shift
+  sessionStart = Date.now();
 }
 
 async function trySwap(pos1: Pos, pos2: Pos): Promise<void> {
@@ -766,6 +834,10 @@ boardEl.addEventListener('pointerdown', (event: PointerEvent) => {
   pointerStart = { pos: { r, c }, x: event.clientX, y: event.clientY, time: performance.now() };
   dragTriggered = false;
   boardEl.setPointerCapture(event.pointerId);
+
+  const gemIdx = posIdx(r, c);
+  const gemEl = gems[gemIdx];
+  if (gemEl) gemEl.classList.add('touching');
 });
 
 boardEl.addEventListener('pointermove', (event: PointerEvent) => {
@@ -791,6 +863,9 @@ boardEl.addEventListener('pointermove', (event: PointerEvent) => {
   }
 
   dragTriggered = true;
+  // Remove touch feedback on drag
+  const dragIdx = posIdx(start.r, start.c);
+  gems[dragIdx]?.classList.remove('touching');
   gameState.selected = null;
   renderBoard(gameState.currentBoard!);
   void trySwap(start, target);
@@ -798,6 +873,10 @@ boardEl.addEventListener('pointermove', (event: PointerEvent) => {
 
 boardEl.addEventListener('pointerup', (event: PointerEvent) => {
   if (!pointerStart || pointerId !== event.pointerId) return;
+
+  // Remove touch feedback
+  const prevIdx = posIdx(pointerStart.pos.r, pointerStart.pos.c);
+  gems[prevIdx]?.classList.remove('touching');
 
   boardEl.releasePointerCapture(event.pointerId);
   pointerId = null;
@@ -835,6 +914,10 @@ boardEl.addEventListener('pointerup', (event: PointerEvent) => {
 
 boardEl.addEventListener('pointercancel', (event: PointerEvent) => {
   if (pointerId === event.pointerId) {
+    if (pointerStart) {
+      const prevIdx = posIdx(pointerStart.pos.r, pointerStart.pos.c);
+      gems[prevIdx]?.classList.remove('touching');
+    }
     pointerId = null;
     pointerStart = null;
     dragTriggered = false;
@@ -917,6 +1000,31 @@ function showOnboarding(): void {
   // Dismiss on any tap after a short delay
   setTimeout(() => document.addEventListener('pointerdown', dismiss), 500);
 }
+
+// Load saved mode (default is zen)
+const savedMode = localStorage.getItem('zen-match-mode') || 'zen';
+if (savedMode === 'classic') {
+  document.body.dataset.mode = 'classic';
+  modeToggle.checked = true;
+} else {
+  document.body.dataset.mode = 'zen';
+}
+
+modeToggle.addEventListener('change', () => {
+  const mode = modeToggle.checked ? 'classic' : 'zen';
+  document.body.dataset.mode = mode;
+  localStorage.setItem('zen-match-mode', mode);
+});
+
+// T44: Session-length awareness (zen mode only)
+function updateSessionHue(): void {
+  if (document.body.dataset.mode !== 'zen') return;
+  const elapsed = (Date.now() - sessionStart) / 1000 / 60; // minutes
+  const degrees = Math.min(elapsed * 2, 40); // 2 deg/min, cap 40
+  document.body.style.filter = degrees > 0.5 ? `hue-rotate(${degrees}deg)` : '';
+}
+
+setInterval(updateSessionHue, 60000);
 
 // Load saved palette before refreshGemColors reads CSS custom properties
 const savedPalette = localStorage.getItem('zen-match-palette') || 'default';

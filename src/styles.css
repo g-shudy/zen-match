@@ -393,6 +393,11 @@ h1 {
   opacity: 0;
 }
 
+.gem.touching {
+  transform: scale(1.05);
+  transition: transform 80ms ease-out;
+}
+
 .gem.selected {
   transform: scale(1.15);
   box-shadow:
@@ -461,15 +466,13 @@ h1 {
 }
 
 .gem.invalid {
-  animation: shake 0.4s ease-in-out;
+  animation: shake 0.4s ease-out;
 }
 
 @keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(-8px); }
-  40% { transform: translateX(8px); }
-  60% { transform: translateX(-6px); }
-  80% { transform: translateX(6px); }
+  0% { transform: translate(0, 0); }
+  30% { transform: translate(var(--slide-x, -8px), var(--slide-y, 0)); }
+  100% { transform: translate(0, 0); }
 }
 
 .gem.falling {
@@ -482,16 +485,12 @@ h1 {
 }
 
 .gem.pending-match {
-  animation: tremble 0.1s ease-in-out infinite;
-  filter: brightness(1.3);
+  animation: pendingGlow 2s ease-in-out infinite;
 }
 
-@keyframes tremble {
-  0% { transform: translate(-1px, -1px); }
-  25% { transform: translate(2px, 0px); }
-  50% { transform: translate(-1px, 2px); }
-  75% { transform: translate(1px, -1px); }
-  100% { transform: translate(-1px, -1px); }
+@keyframes pendingGlow {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.25); }
 }
 
 .gem.activating {
@@ -722,6 +721,22 @@ h1 {
 @keyframes explosionWave {
   0% { transform: translate(-50%, -50%) scale(0); opacity: 1; }
   100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
+}
+
+.particle {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 60;
+  animation: particleFly 0.5s ease-out forwards;
+  will-change: transform, opacity;
+}
+
+@keyframes particleFly {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
 }
 
 .line-effect {
@@ -1158,9 +1173,14 @@ h1 {
     animation: none;
   }
 
+  .particle {
+    animation: none;
+    display: none;
+  }
+
   .gem.pending-match {
     animation: none;
-    filter: brightness(1.2);
+    filter: brightness(1.15);
   }
 }
 
@@ -1186,4 +1206,46 @@ h1 {
 @keyframes tipFade {
   from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
   to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* Zen mode: hide scoring UI */
+body[data-mode="zen"] .score-popup { display: none; }
+body[data-mode="zen"] .combo-counter { display: none; }
+body[data-mode="zen"] .score-display { visibility: hidden; }
+
+.mode-toggle-container {
+  padding: 4px 0;
+}
+
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #7a9ea8;
+  font-size: 0.8rem;
+}
+
+.mode-toggle input[type="checkbox"] {
+  accent-color: #95d5b2;
+}
+
+.mode-label {
+  letter-spacing: 0.05em;
+}
+
+/* T30: Ambient orb combo response in zen mode */
+.ambient.combo-response::before,
+.ambient.combo-response::after {
+  opacity: 0.5;
+  transition: opacity 0.6s ease-out;
+}
+
+/* T31: Sinusoidal easing in zen mode */
+body[data-mode="zen"] .gem {
+  transition-timing-function: cubic-bezier(0.25, 1.0, 0.5, 1);
+}
+
+body[data-mode="zen"] .gem.just-created {
+  animation-timing-function: cubic-bezier(0.22, 0.95, 0.36, 1);
 }
