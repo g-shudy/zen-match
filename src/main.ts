@@ -103,6 +103,7 @@ function createGrid(): void {
     for (let c = 0; c < COLS; c++) {
       const cell = document.createElement('div');
       cell.className = 'cell';
+      cell.tabIndex = 0;
       cell.dataset.row = String(r);
       cell.dataset.col = String(c);
 

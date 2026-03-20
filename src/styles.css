@@ -234,6 +234,27 @@ h1 {
   transform: scale(1.08);
 }
 
+.cell:focus-visible {
+  outline: 2px solid #95d5b2;
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+.new-game-btn:focus-visible {
+  outline: 2px solid #95d5b2;
+  outline-offset: 2px;
+}
+
+.gem-slider:focus-visible {
+  outline: 2px solid #95d5b2;
+  outline-offset: 4px;
+}
+
+.how-to-play-toggle:focus-visible {
+  outline: 2px solid #95d5b2;
+  outline-offset: 2px;
+}
+
 .gem {
   width: var(--gem-size, 40px);
   height: var(--gem-size, 40px);
@@ -629,7 +650,7 @@ h1 {
 
 .hint-text {
   font-size: 0.85rem;
-  color: #5a7a84;
+  color: #8aAAB4;
   letter-spacing: 0.1em;
   margin-top: 8px;
 }
@@ -660,7 +681,7 @@ h1 {
   bottom: 12px;
   left: 12px;
   font-size: 0.65rem;
-  color: #4a6a74;
+  color: #7a9ea8;
   letter-spacing: 0.08em;
   cursor: pointer;
   transition: color 0.2s ease;
@@ -728,7 +749,7 @@ h1 {
 
 .score-history span {
   white-space: nowrap;
-  opacity: 0.5;
+  opacity: 0.6;
 }
 
 .score-history span:first-child {
@@ -859,7 +880,7 @@ h1 {
 .help-col p {
   font-size: 0.78rem;
   line-height: 1.6;
-  color: #8a9ea8;
+  color: #96b0b8;
   margin-bottom: 8px;
 }
 
