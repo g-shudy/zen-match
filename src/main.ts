@@ -729,12 +729,12 @@ function clearHint(): void {
 }
 
 function showHint(): void {
-  if (isProcessing) return;
+  if (gameState.isProcessing) return;
   clearHint();
   const move = engine.findValidMove();
   if (!move) return;
-  const idx1 = move.r1 * COLS + move.c1;
-  const idx2 = move.r2 * COLS + move.c2;
+  const idx1 = posIdx(move.r1, move.c1);
+  const idx2 = posIdx(move.r2, move.c2);
   gems[idx1]?.classList.add('hint-glow');
   gems[idx2]?.classList.add('hint-glow');
   hintedCells = [idx1, idx2];
