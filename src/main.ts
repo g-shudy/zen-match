@@ -84,6 +84,7 @@ const gemSliderValue = getEl<HTMLSpanElement>('gemSliderValue');
 const gridSlider = getEl<HTMLInputElement>('gridSlider');
 const gridSliderValue = getEl<HTMLSpanElement>('gridSliderValue');
 const floatingMessage = getEl<HTMLDivElement>('floatingMessage');
+const paletteSelect = getEl<HTMLSelectElement>('paletteSelect');
 
 const cells: HTMLDivElement[] = [];
 const gems: HTMLDivElement[] = [];
@@ -836,6 +837,19 @@ gridSlider.addEventListener('input', () => {
   showSliderChangeMessage();
 });
 
+paletteSelect.addEventListener('change', () => {
+  const palette = paletteSelect.value;
+  if (palette === 'default') {
+    delete document.documentElement.dataset.palette;
+  } else {
+    document.documentElement.dataset.palette = palette;
+  }
+  localStorage.setItem('zen-match-palette', palette);
+  refreshGemColors();
+  renderBoard(gameState.currentBoard!);
+  renderStats();
+});
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -858,6 +872,13 @@ function showOnboarding(): void {
 
   // Dismiss on any tap after a short delay
   setTimeout(() => document.addEventListener('pointerdown', dismiss), 500);
+}
+
+// Load saved palette before refreshGemColors reads CSS custom properties
+const savedPalette = localStorage.getItem('zen-match-palette') || 'default';
+if (savedPalette !== 'default') {
+  document.documentElement.dataset.palette = savedPalette;
+  paletteSelect.value = savedPalette;
 }
 
 refreshGemColors();

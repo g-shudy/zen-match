@@ -21,6 +21,34 @@
   --gem-color-9-dark: #d9577f;
 }
 
+/* Red-Green Friendly palette (protan/deutan safe) */
+[data-palette="redgreen"] {
+  --gem-color-0: #2563EB; --gem-color-0-dark: #1D4ED8;
+  --gem-color-1: #FACC15; --gem-color-1-dark: #D4A90F;
+  --gem-color-2: #DC2626; --gem-color-2-dark: #B91C1C;
+  --gem-color-3: #E2E8F0; --gem-color-3-dark: #CBD5E1;
+  --gem-color-4: #7C3AED; --gem-color-4-dark: #6D28D9;
+  --gem-color-5: #0891B2; --gem-color-5-dark: #0E7490;
+  --gem-color-6: #78350F; --gem-color-6-dark: #5C2907;
+  --gem-color-7: #84CC16; --gem-color-7-dark: #65A30D;
+  --gem-color-8: #DB2777; --gem-color-8-dark: #BE185D;
+  --gem-color-9: #64748B; --gem-color-9-dark: #475569;
+}
+
+/* High Contrast palette */
+[data-palette="highcontrast"] {
+  --gem-color-0: #2563EB; --gem-color-0-dark: #1E40AF;
+  --gem-color-1: #F97316; --gem-color-1-dark: #C2410C;
+  --gem-color-2: #F1F5F9; --gem-color-2-dark: #CBD5E1;
+  --gem-color-3: #BE185D; --gem-color-3-dark: #9D174D;
+  --gem-color-4: #16A34A; --gem-color-4-dark: #15803D;
+  --gem-color-5: #EAB308; --gem-color-5-dark: #CA8A04;
+  --gem-color-6: #1E293B; --gem-color-6-dark: #0F172A;
+  --gem-color-7: #A78BFA; --gem-color-7-dark: #7C3AED;
+  --gem-color-8: #DC2626; --gem-color-8-dark: #B91C1C;
+  --gem-color-9: #0D9488; --gem-color-9-dark: #0F766E;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -170,6 +198,17 @@ h1 {
   color: #7a9ea8;
   min-width: 1.5em;
   text-align: center;
+}
+
+.palette-select {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #7a9ea8;
+  font-family: 'Quicksand', sans-serif;
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
 }
 
 .floating-message {
