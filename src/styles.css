@@ -363,7 +363,7 @@ h1 {
 }
 
 .cell:focus-visible {
-  border-radius: 10px;
+  border-radius: var(--gem-radius, 10px);
 }
 
 .gem-slider:focus-visible {
@@ -374,7 +374,7 @@ h1 {
 .gem {
   width: var(--gem-size, 40px);
   height: var(--gem-size, 40px);
-  border-radius: 10px;
+  border-radius: var(--gem-radius, 10px);
   position: absolute;
   display: flex;
   align-items: center;
@@ -627,7 +627,7 @@ h1 {
 }
 
 .gem.special-line {
-  border-radius: 8px;
+  border-radius: var(--gem-radius, 10px);
   position: relative;
 }
 

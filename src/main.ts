@@ -139,6 +139,7 @@ function updateBoardSizing(): void {
   boardEl.style.setProperty('--grid-cols', String(config.cols));
   boardEl.style.setProperty('--cell-size', `${cellSize}px`);
   boardEl.style.setProperty('--gem-size', `${gemSize}px`);
+  boardEl.style.setProperty('--gem-radius', `${Math.max(2, Math.round(gemSize * 0.18))}px`);
 }
 
 function createGrid(): void {
@@ -794,7 +795,7 @@ function isAdjacent(a: Pos, b: Pos): boolean {
 
 let hintTimer: number | undefined;
 let hintedCells: number[] = [];
-let hintsEnabled = localStorage.getItem('zen-match-hints') !== 'off';
+let hintsEnabled = localStorage.getItem('zen-match-hints') === 'on';
 
 function clearHint(): void {
   for (const idx of hintedCells) {
