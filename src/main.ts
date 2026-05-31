@@ -6,6 +6,7 @@ import {
   type Frame,
   type Pos,
   type Effect,
+  type GemMove,
   type RemovalAnim,
   type RemovalSubStep
 } from './engine/index';
@@ -39,8 +40,8 @@ const config = {
     substepClear: 300,
     boardSync: 100,
     specialCreated: 300,
-    drop: 250,
-    fill: 200,
+    drop: 360,
+    fill: 420,
     preview: 400,
     shufflePause: 500,
     shuffleMove: 700,
@@ -472,6 +473,81 @@ function applyRemovalAnimations(positions: Pos[], animations: Record<string, Rem
   }
 }
 
+function isInBounds(pos: Pos): boolean {
+  return pos.r >= 0 && pos.r < config.rows && pos.c >= 0 && pos.c < config.cols;
+}
+
+function cellStepY(): number {
+  if (config.rows > 1) {
+    const first = cells[0]?.getBoundingClientRect();
+    const next = cells[config.cols]?.getBoundingClientRect();
+    if (first && next) return next.top - first.top;
+  }
+  return cells[0]?.getBoundingClientRect().height || 48;
+}
+
+async function animateGemMoves(
+  board: Board,
+  moves: GemMove[],
+  duration: number,
+  staggerMax: number,
+  easing = 'cubic-bezier(0.25, 1, 0.5, 1)'
+): Promise<void> {
+  if (moves.length === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    renderBoard(board);
+    await sleep(20);
+    return;
+  }
+
+  const oldRects = moves.map(move => {
+    if (!isInBounds(move.from)) return null;
+    return cells[posIdx(move.from.r, move.from.c)]?.getBoundingClientRect() || null;
+  });
+
+  renderBoard(board);
+  const stepY = cellStepY();
+
+  moves.forEach((move, index) => {
+    const gemEl = gems[posIdx(move.to.r, move.to.c)];
+    if (!gemEl) return;
+
+    const newRect = cells[posIdx(move.to.r, move.to.c)].getBoundingClientRect();
+    const oldRect = oldRects[index];
+    const oldLeft = oldRect ? oldRect.left : newRect.left;
+    const oldTop = oldRect ? oldRect.top : newRect.top + (move.from.r - move.to.r) * stepY;
+    const dx = oldLeft - newRect.left;
+    const dy = oldTop - newRect.top;
+
+    if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) return;
+
+    gemEl.classList.add('falling');
+    gemEl.style.transform = `translate(${dx}px, ${dy}px)`;
+    gemEl.style.transition = 'none';
+  });
+
+  void boardEl.offsetHeight;
+
+  moves.forEach((move, index) => {
+    const gemEl = gems[posIdx(move.to.r, move.to.c)];
+    if (!gemEl) return;
+
+    const stagger = staggerMax > 0 ? Math.min(staggerMax, index * 18) : 0;
+    gemEl.style.transition = `transform ${duration}ms ${easing} ${stagger}ms`;
+    gemEl.style.transform = '';
+  });
+
+  await sleep(duration + staggerMax);
+
+  for (const move of moves) {
+    const gemEl = gems[posIdx(move.to.r, move.to.c)];
+    if (gemEl) {
+      gemEl.classList.remove('falling');
+      gemEl.style.transition = '';
+      gemEl.style.transform = '';
+    }
+  }
+}
+
 async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>, token: number): Promise<void> {
   if (!frame.moves || frame.moves.length === 0) {
     renderBoard(frame.board);
@@ -651,12 +727,10 @@ async function playFrames(frames: Frame[], token: number): Promise<void> {
         break;
       }
       case 'drop':
-        renderBoard(frame.board);
-        await sleep(config.timing.drop);
+        await animateGemMoves(frame.board, frame.moves, config.timing.drop, 90);
         break;
       case 'fill':
-        renderBoard(frame.board);
-        await sleep(config.timing.fill);
+        await animateGemMoves(frame.board, frame.moves, config.timing.fill, 120, 'cubic-bezier(0.22, 0.95, 0.36, 1)');
         break;
       case 'preview':
         // Phase 5A: Trembling preview of pending matches

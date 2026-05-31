@@ -46,6 +46,30 @@ test('Swap that creates a match yields points', () => {
   assert.ok(result.pointsEarned > 0);
 });
 
+test('Drop and fill frames include movement metadata for falling animation', () => {
+  const engine = new Engine({ rows: 4, cols: 4, gemTypes: 4, seed: 7 });
+  const board = [
+    [makeCell(1), makeCell(2), makeCell(3), makeCell(1)],
+    [makeCell(1), makeCell(2), makeCell(3), makeCell(2)],
+    [makeCell(0), makeCell(0), makeCell(1), makeCell(3)],
+    [makeCell(2), makeCell(1), makeCell(0), makeCell(3)]
+  ];
+
+  engine.setBoard(board);
+  const result = engine.swap({ r: 2, c: 2 }, { r: 3, c: 2 });
+
+  const dropFrame = result.frames.find(frame => frame.kind === 'drop');
+  const fillFrame = result.frames.find(frame => frame.kind === 'fill');
+
+  assert.ok(dropFrame, 'Expected a drop frame after removing the match');
+  assert.ok(fillFrame, 'Expected a fill frame after dropped gems settle');
+
+  assert.ok(dropFrame.moves.length > 0, 'Drop frame should describe moved gems');
+  assert.ok(fillFrame.moves.length > 0, 'Fill frame should describe new gems');
+  assert.ok(dropFrame.moves.every(move => move.from.r < move.to.r), 'Dropped gems should move downward');
+  assert.ok(fillFrame.moves.every(move => move.from.r < 0), 'New gems should start above the board');
+});
+
 // Phase 3A: BFS-unified parallel runs get correct effectiveLen
 test('BFS-unified parallel 3-runs get correct effectiveLen', () => {
   // Two parallel horizontal 3-runs of same color, adjacent vertically

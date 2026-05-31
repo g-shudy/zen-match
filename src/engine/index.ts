@@ -81,15 +81,21 @@ export interface RemovalSubStep {
   effects: Effect[];
 }
 
+export interface GemMove {
+  from: Pos;
+  to: Pos;
+  type: number;
+}
+
 export type Frame =
   | { kind: 'swap'; board: Board }
   | { kind: 'invalid'; positions: Pos[] }
   | { kind: 'remove'; positions: Pos[]; animations: Record<string, RemovalAnim>; effects: Effect[]; score: ScoreEvent; subSteps?: RemovalSubStep[] }
   | { kind: 'board'; board: Board; newSpecials?: Pos[] }
-  | { kind: 'drop'; board: Board }
-  | { kind: 'fill'; board: Board }
+  | { kind: 'drop'; board: Board; moves: GemMove[] }
+  | { kind: 'fill'; board: Board; moves: GemMove[] }
   | { kind: 'preview'; board: Board; pendingPositions: Pos[] }
-  | { kind: 'shuffle'; board: Board; attempt: number; moves?: Array<{ from: Pos; to: Pos; type: number }> };
+  | { kind: 'shuffle'; board: Board; attempt: number; moves?: GemMove[] };
 
 export interface ResolveResult {
   frames: Frame[];
@@ -448,11 +454,11 @@ export class Engine {
       removePositions(board, toRemove);
       frames.push({ kind: 'board', board: cloneBoard(board) });
 
-      const dropped = dropGems(board, rows, cols);
-      if (dropped) frames.push({ kind: 'drop', board: cloneBoard(board) });
+      const dropMoves = dropGems(board, rows, cols);
+      if (dropMoves.length > 0) frames.push({ kind: 'drop', board: cloneBoard(board), moves: dropMoves });
 
-      const filled = fillGems(board, rows, cols, this.state.gemTypes, this.state.rng);
-      if (filled) frames.push({ kind: 'fill', board: cloneBoard(board) });
+      const fillMoves = fillGems(board, rows, cols, this.state.gemTypes, this.state.rng);
+      if (fillMoves.length > 0) frames.push({ kind: 'fill', board: cloneBoard(board), moves: fillMoves });
 
       const cascadeResult = processMatches(this.state, frames);
       pointsEarned += cascadeResult.points;
@@ -518,11 +524,11 @@ export class Engine {
       removePositions(board, toRemove);
       frames.push({ kind: 'board', board: cloneBoard(board) });
 
-      const dropped = dropGems(board, rows, cols);
-      if (dropped) frames.push({ kind: 'drop', board: cloneBoard(board) });
+      const dropMoves = dropGems(board, rows, cols);
+      if (dropMoves.length > 0) frames.push({ kind: 'drop', board: cloneBoard(board), moves: dropMoves });
 
-      const filled = fillGems(board, rows, cols, this.state.gemTypes, this.state.rng);
-      if (filled) frames.push({ kind: 'fill', board: cloneBoard(board) });
+      const fillMoves = fillGems(board, rows, cols, this.state.gemTypes, this.state.rng);
+      if (fillMoves.length > 0) frames.push({ kind: 'fill', board: cloneBoard(board), moves: fillMoves });
 
       const cascadeResult = processMatches(this.state, frames);
       pointsEarned += cascadeResult.points;
@@ -990,11 +996,11 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
 
     frames.push({ kind: 'board', board: cloneBoard(board), newSpecials: newSpecialPositions.length > 0 ? newSpecialPositions : undefined });
 
-    const dropped = dropGems(board, rows, cols);
-    if (dropped) frames.push({ kind: 'drop', board: cloneBoard(board) });
+    const dropMoves = dropGems(board, rows, cols);
+    if (dropMoves.length > 0) frames.push({ kind: 'drop', board: cloneBoard(board), moves: dropMoves });
 
-    const filled = fillGems(board, rows, cols, state.gemTypes, state.rng);
-    if (filled) frames.push({ kind: 'fill', board: cloneBoard(board) });
+    const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng);
+    if (fillMoves.length > 0) frames.push({ kind: 'fill', board: cloneBoard(board), moves: fillMoves });
 
     matches = findMatches(board, rows, cols);
 
@@ -1013,43 +1019,49 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
   return { points: totalPoints };
 }
 
-function dropGems(board: Board, rows: number, cols: number): boolean {
-  let dropped = false;
+function dropGems(board: Board, rows: number, cols: number): GemMove[] {
+  const moves: GemMove[] = [];
 
   for (let c = 0; c < cols; c++) {
     let writePos = rows - 1;
     for (let r = rows - 1; r >= 0; r--) {
       if (board[r][c]) {
         if (writePos !== r) {
-          board[writePos][c] = board[r][c];
+          const cell = board[r][c]!;
+          board[writePos][c] = cell;
           board[r][c] = null;
-          dropped = true;
+          moves.push({ from: { r, c }, to: { r: writePos, c }, type: cell.type });
         }
         writePos--;
       }
     }
   }
 
-  return dropped;
+  return moves;
 }
 
-function fillGems(board: Board, rows: number, cols: number, gemTypes: number, rng: RNG): boolean {
-  let filled = false;
+function fillGems(board: Board, rows: number, cols: number, gemTypes: number, rng: RNG): GemMove[] {
+  const moves: GemMove[] = [];
 
   for (let c = 0; c < cols; c++) {
+    const emptyRows: number[] = [];
     for (let r = 0; r < rows; r++) {
-      if (!board[r][c]) {
-        board[r][c] = {
-          type: rng.int(gemTypes),
-          special: SPECIAL.NONE,
-          direction: null
-        };
-        filled = true;
-      }
+      if (!board[r][c]) emptyRows.push(r);
+    }
+
+    for (let i = 0; i < emptyRows.length; i++) {
+      const r = emptyRows[i];
+      const type = rng.int(gemTypes);
+      board[r][c] = {
+        type,
+        special: SPECIAL.NONE,
+        direction: null
+      };
+      moves.push({ from: { r: i - emptyRows.length, c }, to: { r, c }, type });
     }
   }
 
-  return filled;
+  return moves;
 }
 
 export function hasValidMoves(board: Board, rows: number, cols: number): boolean {
