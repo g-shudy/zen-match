@@ -17,10 +17,21 @@ document.getElementById('versionTag')!.addEventListener('click', () => {
 
 const urlParams = new URLSearchParams(window.location.search);
 
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+// Math.max(lo, Math.min(hi, NaN)) is NaN, so a bare clamp lets non-numeric params
+// through: ?grid=abc rendered a 0-cell board, ?gems=abc threw and left every gem
+// invisible. Fall back to the default whenever the parse isn't a finite number.
+function intParam(name: string, fallback: number, lo: number, hi: number): number {
+  const raw = urlParams.get(name);
+  if (raw === null || raw.trim() === '') return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : fallback;
+}
+
 const seedParam = urlParams.get('seed');
-const initGridSize = clamp(parseInt(urlParams.get('grid') || '8', 10), 4, 16);
-const initGemTypes = clamp(parseInt(urlParams.get('gems') || '5', 10), 2, 10);
+const parsedSeed = seedParam !== null ? parseInt(seedParam, 10) : NaN;
+const hasValidSeed = Number.isFinite(parsedSeed);
+const initGridSize = intParam('grid', 8, 4, 16);
+const initGemTypes = intParam('gems', 5, 2, 10);
 
 const config = {
   gridSize: initGridSize,
@@ -29,8 +40,8 @@ const config = {
   gemTypes: initGemTypes,
   pendingGridSize: initGridSize,
   pendingGemTypes: initGemTypes,
-  seed: seedParam ? parseInt(seedParam, 10) : Date.now(),
-  seedLocked: seedParam !== null,
+  seed: hasValidSeed ? parsedSeed : Date.now(),
+  seedLocked: hasValidSeed,
   maxHistory: 20,
   timing: {
     swap: 200,
@@ -779,6 +790,7 @@ function resetStats(): void {
   gameState.pendingPoints = 0;
   gameState.selected = null;
   avgScoreEl.textContent = '0';
+  totalScoreEl.textContent = '0';
   gameState.distHistory = [];
   gameState.scoreHistory = [];
   gameState.avgHistory = [];
@@ -786,6 +798,11 @@ function resetStats(): void {
 }
 
 function startNewGame(): void {
+  // Belt-and-braces: a superseded in-flight move clears these in its own `finally`,
+  // but a new game must never inherit a locked board.
+  gameState.isProcessing = false;
+  boardEl.classList.remove('processing');
+
   const newUrl = new URL(window.location.toString());
   let needsGridRebuild = false;
 
@@ -845,12 +862,17 @@ async function trySwap(pos1: Pos, pos2: Pos): Promise<void> {
   const localToken = ++gameState.runToken;
 
   const result = engine.swap(pos1, pos2);
-  await playFrames(result.frames, localToken);
+  try {
+    await playFrames(result.frames, localToken);
+  } finally {
+    // Must run even when a New Game superseded this move. Without it the class
+    // stuck on and CSS pointer-events:none left the board permanently unclickable.
+    boardEl.classList.remove('processing');
+  }
 
   if (localToken !== gameState.runToken) return;
 
   gameState.isProcessing = false;
-  boardEl.classList.remove('processing');
   recordMove(engine.state.board, result.pointsEarned);
   gameState.pendingPoints = 0;
 
@@ -1102,6 +1124,7 @@ modeToggle.addEventListener('change', () => {
   const mode = modeToggle.checked ? 'classic' : 'zen';
   document.body.dataset.mode = mode;
   localStorage.setItem('zen-match-mode', mode);
+  updateSessionHue();
 });
 
 const hintsToggle = getEl<HTMLInputElement>('hintsToggle');
@@ -1115,7 +1138,12 @@ hintsToggle.addEventListener('change', () => {
 
 // T44: Session-length awareness (zen mode only)
 function updateSessionHue(): void {
-  if (document.body.dataset.mode !== 'zen') return;
+  if (document.body.dataset.mode !== 'zen') {
+    // Clear it, don't just skip: switching to classic mid-session otherwise left
+    // the whole page hue-rotated indefinitely.
+    document.body.style.filter = '';
+    return;
+  }
   const elapsed = (Date.now() - sessionStart) / 1000 / 60; // minutes
   const degrees = Math.min(elapsed * 2, 40); // 2 deg/min, cap 40
   document.body.style.filter = degrees > 0.5 ? `hue-rotate(${degrees}deg)` : '';

@@ -21,11 +21,14 @@ Read the full [Design Philosophy](docs/zen-match-design-philosophy.md).
 
 ## Features
 
-- **8x8 board** with adjustable gem types (2-10)
-- **Special gems** created by matching 4+ in a row:
-  - **Bomb** (4-match): 3x3 explosion
-  - **Line** (5-match): Clears entire row or column
-  - **Rainbow** (6+/L/T): Clears all gems of one color
+- **Adjustable board** (4x4 to 16x16, default 8x8) with adjustable gem types (2-10)
+- **Special gems**, by the size and shape of the matched group:
+  - **Bomb**: a 4-match, or a T/L shape of 5 cells - 3x3 explosion
+  - **Line** (straight 5-match): Clears entire row or column
+  - **Rainbow** (any connected group of 6+): Clears all gems of one color
+
+  Groups are counted by connected cells, not run length - two 3-matches that touch
+  form a group of 6 and make a Rainbow.
 - **Chain reactions**: Special gems caught in any explosion trigger automatically
 - **Live stats**: Watch your average climb in real-time as cascades unfold
 - **No score pressure**: Just average points per move - a gentle metric
@@ -41,10 +44,16 @@ Read the full [Design Philosophy](docs/zen-match-design-philosophy.md).
 ## Try Different Modes
 
 ```
-?gems=2   Chaos mode - endless cascades
+?gems=2   Chaos mode - very long cascades
 ?gems=5   Default - balanced zen (recommended)
 ?gems=10  Challenge mode - rare matches
+?grid=12  Bigger board (4-16, default 8)
+?seed=42  Reproducible board
 ```
+
+Cascades are bounded: refills avoid creating immediate matches, and a single move
+resolves at most 50 cascade waves. At `?gems=2` that limit is reached routinely -
+one move can already be over a minute of animation.
 
 ## Tech
 
