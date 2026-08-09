@@ -103,6 +103,16 @@ export interface ResolveResult {
   moveValid: boolean;
 }
 
+// Cascade waves allowed per move. The match-avoiding refill in fillGems cuts runaway
+// depth by ~99% (measured worst case 142,888 -> 1,824 waves at 16x16 gems=2) but does
+// not fully tame the lowest gem counts, so this cap does genuinely fire at gems=2/3 -
+// it is load-bearing there, not decoration.
+//
+// It is a playability limit as much as a safety one: playFrames animates at 100-700ms
+// per frame, so 50 waves is already ~75 seconds of animation for a single move.
+// Untamed, one gems=2 move blocked the main thread for 7.3s and grew the heap to 2.4GB.
+const MAX_CASCADE_DEPTH = 50;
+
 interface MatchGroup {
   positions: Pos[];
   effectiveLen: number;
@@ -143,6 +153,25 @@ function isRainbow(cell: Cell | null): boolean {
 
 function createEmptyBoard(rows: number, cols: number): Board {
   return Array.from({ length: rows }, () => Array.from({ length: cols }, () => null));
+}
+
+// Pick a gem type that does not immediately complete a 3-run with the two cells
+// to the left or the two above. Callers fill left-to-right, top-to-bottom, so
+// those neighbours are already settled. Only looks back, never forward: a run can
+// still be completed from the right, which is acceptable and matches the original
+// board-generation behaviour.
+function pickNonMatchingType(board: Board, r: number, c: number, gemTypes: number, rng: RNG): number {
+  let type = 0;
+  let attempts = 0;
+  do {
+    type = rng.int(gemTypes);
+    attempts++;
+  } while (
+    attempts < 50 &&
+    ((c >= 2 && board[r][c - 1]?.type === type && board[r][c - 2]?.type === type) ||
+      (r >= 2 && board[r - 1]?.[c]?.type === type && board[r - 2]?.[c]?.type === type))
+  );
+  return type;
 }
 
 export class Engine {
@@ -196,6 +225,8 @@ export class Engine {
       }
       attempts++;
     }
+
+    ensurePlayableBoard(board, rows, cols, this.state.gemTypes, this.state.rng);
 
     this.state.board = board;
     return cloneBoard(board);
@@ -424,13 +455,17 @@ export class Engine {
         points = 1200 + toRemove.size * 15;
       }
 
+      // The two swapped specials are consumed BY the combo above; without seeding
+      // them into `processed` they detonate a second time on top of it, inflating
+      // both the cleared area and the score. Mirrors the rainbow+normal path below.
       const { bonusPoints, chainCount } = activateSpecialsInRemovalSet(
         board,
         toRemove,
         animationClasses,
         rows,
         cols,
-        effects
+        effects,
+        new Set([keyFor(pos1.r, pos1.c), keyFor(pos2.r, pos2.c)])
       );
       chainReactionCount += chainCount;
       points += bonusPoints;
@@ -554,6 +589,7 @@ export class Engine {
         frames.push({ kind: 'invalid', positions: [pos1, pos2] });
         [board[pos1.r][pos1.c], board[pos2.r][pos2.c]] = [board[pos2.r][pos2.c], board[pos1.r][pos1.c]];
         frames.push({ kind: 'board', board: cloneBoard(board) });
+        pointsEarned += rescueDeadBoard(this.state, frames);
       }
     } else {
       const matches = findMatches(board, rows, cols);
@@ -561,6 +597,7 @@ export class Engine {
         frames.push({ kind: 'invalid', positions: [pos1, pos2] });
         [board[pos1.r][pos1.c], board[pos2.r][pos2.c]] = [board[pos2.r][pos2.c], board[pos1.r][pos1.c]];
         frames.push({ kind: 'board', board: cloneBoard(board) });
+        pointsEarned += rescueDeadBoard(this.state, frames);
       } else {
         const cascadeResult = processMatches(this.state, frames);
         pointsEarned += cascadeResult.points;
@@ -587,17 +624,7 @@ export class Engine {
   }
 
   private randomGem(board: Board, r: number, c: number): number {
-    let type = 0;
-    let attempts = 0;
-    do {
-      type = this.state.rng.int(this.state.gemTypes);
-      attempts++;
-    } while (
-      attempts < 50 &&
-      ((c >= 2 && board[r][c - 1]?.type === type && board[r][c - 2]?.type === type) ||
-        (r >= 2 && board[r - 1]?.[c]?.type === type && board[r - 2]?.[c]?.type === type))
-    );
-    return type;
+    return pickNonMatchingType(board, r, c, this.state.gemTypes, this.state.rng);
   }
 }
 
@@ -624,7 +651,7 @@ function removePositions(board: Board, toRemove: Set<string>): void {
 }
 
 export function findMatches(board: Board, rows: number, cols: number): MatchGroup[] {
-  const matchedCells = new Map<string, { r: number; c: number; type: number; matchLen: number; direction: 'horizontal' | 'vertical'; isComplex?: boolean }>();
+  const matchedCells = new Map<string, { r: number; c: number; type: number; direction: 'horizontal' | 'vertical'; isComplex?: boolean }>();
 
   for (let r = 0; r < rows; r++) {
     let c = 0;
@@ -642,11 +669,10 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
         for (let i = c; i < endC; i++) {
           const key = keyFor(r, i);
           if (!matchedCells.has(key)) {
-            matchedCells.set(key, { r, c: i, type, matchLen: len, direction: 'horizontal' });
+            matchedCells.set(key, { r, c: i, type, direction: 'horizontal' });
           } else {
-            const existing = matchedCells.get(key)!;
-            existing.matchLen = Math.max(existing.matchLen, len);
-            existing.isComplex = true;
+            // Unreachable: runs within a row are non-overlapping (c jumps to endC).
+            matchedCells.get(key)!.isComplex = true;
           }
         }
       }
@@ -670,11 +696,10 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
         for (let i = r; i < endR; i++) {
           const key = keyFor(i, c);
           if (!matchedCells.has(key)) {
-            matchedCells.set(key, { r: i, c, type, matchLen: len, direction: 'vertical' });
+            matchedCells.set(key, { r: i, c, type, direction: 'vertical' });
           } else {
-            const existing = matchedCells.get(key)!;
-            existing.matchLen += len;
-            existing.isComplex = true;
+            // Cell is in both a horizontal and a vertical run: an L/T intersection.
+            matchedCells.get(key)!.isComplex = true;
           }
         }
       }
@@ -867,6 +892,16 @@ function activateSpecialsInRemovalSet(
   return { bonusPoints, chainCount, subSteps };
 }
 
+// Shuffle if the board has no legal move left. The valid-move paths already do this
+// after their cascade; the invalid-swap paths did not, so a board that went dead
+// stayed dead — every subsequent swap snapping back with no explanation.
+function rescueDeadBoard(state: EngineState, frames: Frame[]): number {
+  if (hasValidMoves(state.board, state.rows, state.cols)) return 0;
+  const result = shuffleBoard(state, 0);
+  frames.push(...result.frames);
+  return result.points;
+}
+
 function findBestSpecialPosition(match: MatchGroup, lastSwapPos: EngineState['lastSwapPos'], comboCount = 1): Pos {
   // Phase 3F: During cascades (combo > 1), use geometric center instead of swap position
   if (comboCount <= 1 && lastSwapPos) {
@@ -900,7 +935,10 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
   let totalPoints = 0;
   let comboCount = 0;
 
-  while (matches.length > 0) {
+  // Bounding the `while` rather than breaking mid-body means a truncated cascade
+  // always leaves the board in the settled post-fill state the last wave produced,
+  // never half-resolved. See MAX_CASCADE_DEPTH for why the cap is not decorative.
+  while (matches.length > 0 && comboCount < MAX_CASCADE_DEPTH) {
     comboCount++;
 
     const toRemove = new Set<string>();
@@ -1051,7 +1089,10 @@ function fillGems(board: Board, rows: number, cols: number, gemTypes: number, rn
 
     for (let i = 0; i < emptyRows.length; i++) {
       const r = emptyRows[i];
-      const type = rng.int(gemTypes);
+      // Refill with the same match-avoidance the initial board uses. Without this
+      // the engine builds a clean board then refills it carelessly, and below ~4
+      // gem types the refill manufactures matches faster than they clear.
+      const type = pickNonMatchingType(board, r, c, gemTypes, rng);
       board[r][c] = {
         type,
         special: SPECIAL.NONE,
@@ -1062,6 +1103,98 @@ function fillGems(board: Board, rows: number, cols: number, gemTypes: number, rn
   }
 
   return moves;
+}
+
+// Would placing `type` at (r,c) complete a run of 3+ through that cell? Unlike the
+// generation-time predicate this looks in all four directions, so it can repair a
+// cell in the middle of an existing board rather than only append safely.
+function wouldMatchAt(board: Board, r: number, c: number, type: number, rows: number, cols: number): boolean {
+  let run = 1;
+  for (let i = c - 1; i >= 0 && board[r][i]?.type === type; i--) run++;
+  for (let i = c + 1; i < cols && board[r][i]?.type === type; i++) run++;
+  if (run >= 3) return true;
+
+  run = 1;
+  for (let i = r - 1; i >= 0 && board[i][c]?.type === type; i--) run++;
+  for (let i = r + 1; i < rows && board[i][c]?.type === type; i++) run++;
+  return run >= 3;
+}
+
+// Clear any matches sitting on a freshly generated board, silently: no frames, no
+// specials, no score. Generation gives up after 100 rerolls and accepts a matched
+// board, which otherwise hands the player unearned points on their first swap.
+//
+// Repairs matched cells in place rather than removing and refilling them. Refilling
+// cannot converge at gemTypes=2, where "differ from the pair left AND the pair above"
+// is frequently unsatisfiable; recolouring a single cell against all four directions
+// converges in a pass or two.
+function settleBoard(board: Board, rows: number, cols: number, gemTypes: number, rng: RNG): void {
+  for (let pass = 0; pass < 500; pass++) {
+    const matches = findMatches(board, rows, cols);
+    if (matches.length === 0) return;
+
+    // One cell per group per pass, then re-evaluate. Recolouring every cell in a
+    // group is disruptive enough to keep creating fresh matches elsewhere, which
+    // made the search cycle instead of converge.
+    for (const match of matches) {
+      const pos = match.positions[rng.int(match.positions.length)];
+      const cell = board[pos.r][pos.c];
+      if (!cell) continue;
+
+      const start = rng.int(gemTypes);
+      let placed = false;
+      for (let k = 0; k < gemTypes; k++) {
+        const candidate = (start + k) % gemTypes;
+        if (!wouldMatchAt(board, pos.r, pos.c, candidate, rows, cols)) {
+          cell.type = candidate;
+          placed = true;
+          break;
+        }
+      }
+
+      // Every colour is blocked (common at gemTypes=2, e.g. AA_BB horizontally).
+      // Force a different one anyway: it breaks the current configuration so a
+      // later pass can find a clean assignment, instead of stalling forever.
+      if (!placed && gemTypes > 1) {
+        cell.type = (cell.type + 1 + rng.int(gemTypes - 1)) % gemTypes;
+      }
+    }
+  }
+}
+
+// A board with no legal move is a silent soft-lock: every swap snaps back with no
+// explanation, and the shuffle machinery only runs after a *valid* move's cascade.
+function ensurePlayableBoard(board: Board, rows: number, cols: number, gemTypes: number, rng: RNG): void {
+  settleBoard(board, rows, cols, gemTypes, rng);
+  if (hasValidMoves(board, rows, cols)) return;
+  if (rows < 2 || cols < 3) return;
+
+  // Plant a move rather than reshuffling. On a small board with many colours a
+  // random permutation almost never happens to contain a legal move (4x4 gems=10
+  // failed 50 attempts routinely), whereas this constructs one directly:
+  //
+  //     T T x        swapping the two right-hand cells completes T T T
+  //     . . T
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const r = rng.int(rows - 1);
+    const c = rng.int(cols - 2);
+    const t = rng.int(gemTypes);
+    const other = (t + 1) % gemTypes;
+
+    const saved = [board[r][c], board[r][c + 1], board[r][c + 2], board[r + 1][c + 2]];
+    board[r][c] = { type: t, special: SPECIAL.NONE, direction: null };
+    board[r][c + 1] = { type: t, special: SPECIAL.NONE, direction: null };
+    board[r][c + 2] = { type: other, special: SPECIAL.NONE, direction: null };
+    board[r + 1][c + 2] = { type: t, special: SPECIAL.NONE, direction: null };
+
+    // The plant must not itself create a live match.
+    if (findMatches(board, rows, cols).length === 0 && hasValidMoves(board, rows, cols)) return;
+
+    board[r][c] = saved[0];
+    board[r][c + 1] = saved[1];
+    board[r][c + 2] = saved[2];
+    board[r + 1][c + 2] = saved[3];
+  }
 }
 
 export function hasValidMoves(board: Board, rows: number, cols: number): boolean {
@@ -1118,18 +1251,14 @@ function shuffleBoard(state: EngineState, attempts: number): { frames: Frame[]; 
   const MAX_VISUAL_ATTEMPTS = 3;
   const { rows, cols, board } = state;
 
-  // Record old positions for slide animation (Phase 2D)
-  const oldPositions: Array<{ from: Pos; type: number }> = [];
+  // Shuffle {cell, from} pairs so each gem's origin survives Fisher-Yates (Phase 2D
+  // slide animation). Shuffling bare cells against a parallel position array made
+  // every recorded move a no-op (from === to), because that array stayed in
+  // destination order — so the FLIP animation had nothing to animate.
+  const gems: Array<{ cell: Cell; from: Pos }> = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      if (board[r][c]) oldPositions.push({ from: { r, c }, type: board[r][c]!.type });
-    }
-  }
-
-  const gems: Cell[] = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      if (board[r][c]) gems.push(board[r][c]!);
+      if (board[r][c]) gems.push({ cell: board[r][c]!, from: { r, c } });
     }
   }
 
@@ -1142,9 +1271,11 @@ function shuffleBoard(state: EngineState, attempts: number): { frames: Frame[]; 
   const moves: Array<{ from: Pos; to: Pos; type: number }> = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      board[r][c] = gems[idx];
-      if (oldPositions[idx]) {
-        moves.push({ from: oldPositions[idx].from, to: { r, c }, type: gems[idx].type });
+      const entry = gems[idx];
+      // `gems` is shorter than the grid if the board had holes; write null, never undefined.
+      board[r][c] = entry ? entry.cell : null;
+      if (entry) {
+        moves.push({ from: entry.from, to: { r, c }, type: entry.cell.type });
       }
       idx++;
     }
@@ -1189,19 +1320,7 @@ function regenerateBoard(state: EngineState): void {
 
   const board = createEmptyBoard(rows, cols);
 
-  const randomGem = (r: number, c: number): number => {
-    let type = 0;
-    let attempts = 0;
-    do {
-      type = rng.int(gemTypes);
-      attempts++;
-    } while (
-      attempts < 50 &&
-      ((c >= 2 && board[r][c - 1]?.type === type && board[r][c - 2]?.type === type) ||
-        (r >= 2 && board[r - 1]?.[c]?.type === type && board[r - 2]?.[c]?.type === type))
-    );
-    return type;
-  };
+  const randomGem = (r: number, c: number): number => pickNonMatchingType(board, r, c, gemTypes, rng);
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -1226,6 +1345,10 @@ function regenerateBoard(state: EngineState): void {
     }
     attempts++;
   }
+
+  // Settle and guarantee playability before the specials go back, so they survive
+  // (settleBoard would clear any that landed inside a match).
+  ensurePlayableBoard(board, rows, cols, gemTypes, rng);
 
   // Place saved specials back at random positions
   for (const special of savedSpecials) {

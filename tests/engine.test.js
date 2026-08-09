@@ -234,28 +234,48 @@ test('Cascade special placement does not use swap position', () => {
   }
 });
 
-// Phase 4A: Shuffle cascades award points
-test('Shuffle function returns points', () => {
-  // We can't easily test shuffle directly since it's not exported,
-  // but we can verify the engine handles no-valid-moves scenarios
-  const engine = new Engine({ rows: 3, cols: 3, gemTypes: 2, seed: 42 });
-  // Create a board with no valid moves to trigger shuffle
-  const board = [
-    [makeCell(0), makeCell(1), makeCell(0)],
-    [makeCell(1), makeCell(0), makeCell(1)],
-    [makeCell(0), makeCell(1), makeCell(0)]
-  ];
+// Phase 4A: Shuffle cascades award points.
+// NOTE: the previous version of this test used a 3x3 two-colour checkerboard, which
+// DOES have valid moves, so its `if (!hasValid)` body never executed and it asserted
+// nothing. That is why the shuffle-animation bug below went unnoticed.
+test('Dead board is rescued by a shuffle on an invalid swap', () => {
+  const rows = [
+    [3, 0, 0, 3],
+    [3, 0, 1, 2],
+    [1, 2, 3, 3],
+    [1, 2, 0, 1]
+  ].map(row => row.map(t => makeCell(t)));
 
-  engine.setBoard(board);
-  // This board has no matches and a checkerboard pattern - no valid moves
-  const hasValid = hasValidMoves(board, 3, 3);
-  // Checkerboard with 2 colors should have no valid moves
-  if (!hasValid) {
-    // If we try a swap, it would need to shuffle
-    const result = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
-    // After invalid swap + shuffle, points might be earned from shuffle cascades
-    assert.ok(result.frames.length >= 0, 'Should handle shuffle scenario');
-  }
+  assert.equal(hasValidMoves(rows, 4, 4), false, 'fixture must genuinely have no legal move');
+
+  const engine = new Engine({ rows: 4, cols: 4, gemTypes: 4, seed: 7 });
+  engine.setBoard(rows);
+  const result = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
+
+  const shuffle = result.frames.find(f => f.kind === 'shuffle');
+  assert.ok(shuffle, 'a dead board must trigger a shuffle instead of silently soft-locking');
+  assert.equal(hasValidMoves(engine.state.board, 4, 4), true, 'board must be playable afterwards');
+});
+
+test('Shuffle records real motion for the slide animation', () => {
+  const rows = [
+    [3, 0, 0, 3],
+    [3, 0, 1, 2],
+    [1, 2, 3, 3],
+    [1, 2, 0, 1]
+  ].map(row => row.map(t => makeCell(t)));
+
+  const engine = new Engine({ rows: 4, cols: 4, gemTypes: 4, seed: 7 });
+  engine.setBoard(rows);
+  const result = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
+
+  const shuffle = result.frames.find(f => f.kind === 'shuffle' && f.moves);
+  assert.ok(shuffle, 'shuffle frame should carry moves');
+  const moved = shuffle.moves.filter(m => m.from.r !== m.to.r || m.from.c !== m.to.c);
+  assert.ok(
+    moved.length > 0,
+    `every recorded move was from===to (${shuffle.moves.length} moves) - the slide animation cannot animate`
+  );
 });
 
 // Score breakdown is populated correctly
@@ -308,10 +328,99 @@ test('Preview frames emitted during cascades', () => {
     }
   }
 
-  // Preview frames only appear during cascades, which may not always happen
-  // This test just verifies the frame type exists in the type system
-  // and doesn't crash when emitted
-  assert.ok(true, 'Engine handles preview frames without crashing');
+  assert.ok(foundPreview, 'at least one of 50 seeds should cascade and emit a preview frame');
+});
+
+// Regression: cascades were effectively unbounded at low gem counts because
+// fillGems refilled with no match-avoidance while init carefully avoided matches.
+// Worst measured before the fix: 142,888 cascade iterations / 338,156 frames /
+// 2.4 GB heap on a single 8x8 gems=2 move, freezing the tab for 7+ seconds.
+test('Cascades stay bounded at the lowest gem count', () => {
+  for (let seed = 0; seed < 8; seed++) {
+    const engine = new Engine({ rows: 8, cols: 8, gemTypes: 2, seed });
+    engine.init();
+
+    for (let move = 0; move < 12; move++) {
+      const m = engine.findValidMove();
+      if (!m) break;
+      const result = engine.swap({ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
+      assert.ok(
+        result.frames.length < 500,
+        `seed ${seed} move ${move}: ${result.frames.length} frames - cascade is running away`
+      );
+    }
+  }
+});
+
+test('Refill does not manufacture immediate matches', () => {
+  // fillGems must apply the same left/up avoidance the initial board generator uses.
+  for (let seed = 0; seed < 30; seed++) {
+    const engine = new Engine({ rows: 8, cols: 8, gemTypes: 3, seed });
+    engine.init();
+    const m = engine.findValidMove();
+    if (!m) continue;
+    engine.swap({ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
+    // Whatever cascading happened, the engine must come to rest.
+    assert.equal(
+      findMatches(engine.state.board, 8, 8).length,
+      0,
+      `seed ${seed}: board still has live matches after the move settled`
+    );
+  }
+});
+
+test('init produces a settled, playable board', () => {
+  // gems=2 on a large grid is the stress case: "differ from the pair left AND above"
+  // is often unsatisfiable, so generation used to give up and ship a dirty board.
+  for (const [size, gemTypes] of [[16, 2], [8, 2], [8, 10], [4, 10]]) {
+    for (let seed = 0; seed < 25; seed++) {
+      const engine = new Engine({ rows: size, cols: size, gemTypes, seed });
+      const board = engine.init();
+      assert.equal(
+        findMatches(board, size, size).length, 0,
+        `${size}x${size} gems=${gemTypes} seed ${seed}: starts with unearned matches`
+      );
+      assert.equal(
+        hasValidMoves(board, size, size), true,
+        `${size}x${size} gems=${gemTypes} seed ${seed}: starts with no legal move (soft-lock)`
+      );
+    }
+  }
+});
+
+// Regression: the two swapped specials are consumed BY the combo, but were not
+// seeded into `processed`, so they detonated a second time on top of it.
+test('Special+special combo does not detonate the consumed specials twice', () => {
+  const grid = [
+    '12341234',
+    '34123412',
+    '12341234',
+    '43214321',
+    '12341234',
+    '34123412',
+    '12341234',
+    '43214321'
+  ].map(row => [...row].map(ch => makeCell(Number(ch))));
+
+  assert.equal(findMatches(grid, 8, 8).length, 0, 'fixture must start match-free');
+
+  grid[3][3] = makeCell(grid[3][3].type, SPECIAL.BOMB);
+  grid[4][3] = makeCell(grid[4][3].type, SPECIAL.BOMB);
+
+  const engine = new Engine({ rows: 8, cols: 8, gemTypes: 5, seed: 3 });
+  engine.setBoard(grid);
+  const result = engine.swap({ r: 3, c: 3 }, { r: 4, c: 3 });
+
+  const blast = result.frames.find(f => f.kind === 'remove');
+  assert.ok(blast, 'combo should emit a remove frame');
+
+  const explosions = blast.effects.filter(e => e.kind === 'explosion');
+  assert.equal(explosions.length, 1, 'bomb+bomb is one 5x5 blast, not three overlapping ones');
+  assert.equal(blast.positions.length, 25, '5x5 centred away from any edge clears 25 cells');
+  assert.equal(
+    blast.score.points, 1000 + 25 * 15,
+    'score must match the documented formula with no re-detonation bonus'
+  );
 });
 
 // Shuffle preserves specials during regeneration
