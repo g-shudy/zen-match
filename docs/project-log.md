@@ -31,6 +31,8 @@
 |---|-------|-----------|--------|------------|
 | I1 | Pointer capture not released at trySwap start | iOS Safari | Open | Could leave board stuck if cascade starts during drag |
 | I2 | pointerdown on abs-positioned grid children can misfire on iOS 16.x | iOS Safari | Open | Needs test pass |
+| I3 | Classic palette swatch card inherited the live palette from `<html>` and changed with the selection | Jerry (iPhone) | Fixed 2026-09-01 | Card scoped with `data-palette="default"`; `tests/palette-cards.test.js` enforces self-scoping (6c4ab2e) |
+| I4 | `npm test` passed against a stale `dist/engine.js`; the 2.0 build script emitted `dist/engine/index.js` | Fresh worktree | Fixed 2026-09-01 | Named esbuild entries (2b747d4) |
 
 ## Status
 
