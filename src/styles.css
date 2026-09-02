@@ -8,7 +8,11 @@
 
 /* 1. Palettes ------------------------------------------------------------ */
 
-:root {
+/* Classic. Also declared as an explicit scope so the Classic swatch card keeps
+   its own colours while another palette is active on <html>; without it the
+   card inherits the live palette and its preview silently changes. */
+:root,
+[data-palette="default"] {
   --gem-color-0: #7ec8e3;
   --gem-color-0-dark: #5ba3c0;
   --gem-color-1: #e07a5f;
