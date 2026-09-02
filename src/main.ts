@@ -2,6 +2,7 @@ import './styles.css';
 import {
   Engine,
   SPECIAL,
+  cloneBoard,
   type Board,
   type Frame,
   type Pos,
@@ -10,39 +11,86 @@ import {
   type RemovalAnim,
   type RemovalSubStep
 } from './engine/index';
+import {
+  LIMITS,
+  parseSettings,
+  serializeSettings,
+  resolveSettings,
+  serializeGame,
+  parseSavedGame,
+  type PaletteId,
+  type Settings
+} from './storage';
 
-document.getElementById('versionTag')!.addEventListener('click', () => {
-  location.reload();
-});
+declare const __APP_VERSION__: string;
+
+// ---------------------------------------------------------------------------
+// Persistence
+// ---------------------------------------------------------------------------
+
+const KEYS = {
+  settings: 'zen-match:settings',
+  game: 'zen-match:game',
+  visited: 'zen-match-visited',
+  legacyPalette: 'zen-match-palette',
+  legacyMode: 'zen-match-mode',
+  legacyHints: 'zen-match-hints'
+};
+
+// localStorage throws in some private-browsing modes; the game must not.
+const store = {
+  get(key: string): string | null {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key: string, value: string): void {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* ignore */
+    }
+  },
+  remove(key: string): void {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
+};
 
 const urlParams = new URLSearchParams(window.location.search);
-
-// Math.max(lo, Math.min(hi, NaN)) is NaN, so a bare clamp lets non-numeric params
-// through: ?grid=abc rendered a 0-cell board, ?gems=abc threw and left every gem
-// invisible. Fall back to the default whenever the parse isn't a finite number.
-function intParam(name: string, fallback: number, lo: number, hi: number): number {
-  const raw = urlParams.get(name);
-  if (raw === null || raw.trim() === '') return fallback;
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : fallback;
-}
-
 const seedParam = urlParams.get('seed');
 const parsedSeed = seedParam !== null ? parseInt(seedParam, 10) : NaN;
 const hasValidSeed = Number.isFinite(parsedSeed);
-const initGridSize = intParam('grid', 8, 4, 16);
-const initGemTypes = intParam('gems', 5, 2, 10);
 
+// Desired board: URL > stored > default. The pre-2.0 keys are folded in once
+// and removed; classic mode and hints no longer exist.
+const settings: Settings = resolveSettings(
+  urlParams,
+  parseSettings(store.get(KEYS.settings), store.get(KEYS.legacyPalette))
+);
+store.remove(KEYS.legacyPalette);
+store.remove(KEYS.legacyMode);
+store.remove(KEYS.legacyHints);
+
+function persistSettings(): void {
+  store.set(KEYS.settings, serializeSettings(settings));
+}
+
+persistSettings();
+
+// Live board configuration. `settings` may run ahead of this until New Game.
 const config = {
-  gridSize: initGridSize,
-  rows: initGridSize,
-  cols: initGridSize,
-  gemTypes: initGemTypes,
-  pendingGridSize: initGridSize,
-  pendingGemTypes: initGemTypes,
+  gridSize: settings.gridSize,
+  rows: settings.gridSize,
+  cols: settings.gridSize,
+  gemTypes: settings.gemTypes,
   seed: hasValidSeed ? parsedSeed : Date.now(),
   seedLocked: hasValidSeed,
-  maxHistory: 20,
   timing: {
     swap: 200,
     invalid: 400,
@@ -56,9 +104,11 @@ const config = {
     preview: 400,
     shufflePause: 500,
     shuffleMove: 700,
-    comboHide: 500,
-    scorePopup: 1000,
-  },
+    dissolve: 420,
+    reform: 520,
+    glow: 1400,
+    ambient: 1200
+  }
 };
 
 const gameState = {
@@ -68,17 +118,17 @@ const gameState = {
   pendingPoints: 0,
   gamePoints: 0,
   gameMoves: 0,
-  currentBoard: null as Board | null,
-  distHistory: [] as number[][],
-  scoreHistory: [] as number[],
-  avgHistory: [] as number[],
+  maxCombo: 0,
+  currentBoard: null as Board | null
 };
 
 const engine = new Engine({ rows: config.rows, cols: config.cols, gemTypes: config.gemTypes, seed: config.seed });
-gameState.currentBoard = engine.state.board;
 
-// T44: Session start time for zen mode hue shift
-let sessionStart = Date.now();
+const sessionStart = Date.now();
+
+// ---------------------------------------------------------------------------
+// DOM
+// ---------------------------------------------------------------------------
 
 function getEl<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -86,34 +136,55 @@ function getEl<T extends HTMLElement>(id: string): T {
   return el as T;
 }
 
+const stageEl = getEl<HTMLElement>('stage');
 const boardEl = getEl<HTMLDivElement>('board');
-const avgScoreEl = getEl<HTMLSpanElement>('avgScore');
-const totalScoreEl = getEl<HTMLSpanElement>('totalScore');
-const scoreHistoryEl = getEl<HTMLDivElement>('scoreHistory');
-const comboCounterEl = getEl<HTMLDivElement>('comboCounter');
-const shuffleNotice = getEl<HTMLDivElement>('shuffleNotice');
-const distHistoryEl = document.getElementById('distHistory') as HTMLDivElement | null;
-const avgSparklineEl = document.getElementById('avgSparkline') as HTMLCanvasElement | null;
+const scoreEl = getEl<HTMLSpanElement>('score');
+const toastEl = getEl<HTMLDivElement>('toast');
 const newGameBtn = getEl<HTMLButtonElement>('newGame');
-const gemSlider = getEl<HTMLInputElement>('gemSlider');
-const gemSliderValue = getEl<HTMLSpanElement>('gemSliderValue');
-const gridSlider = getEl<HTMLInputElement>('gridSlider');
-const gridSliderValue = getEl<HTMLSpanElement>('gridSliderValue');
-const floatingMessage = getEl<HTMLDivElement>('floatingMessage');
-const paletteSelect = getEl<HTMLSelectElement>('paletteSelect');
+const helpBtn = getEl<HTMLButtonElement>('helpBtn');
 const settingsBtn = getEl<HTMLButtonElement>('settingsBtn');
-const settingsPanel = getEl<HTMLDivElement>('settingsPanel');
-const modeToggle = getEl<HTMLInputElement>('modeToggle');
+const settingsSheet = getEl<HTMLDialogElement>('settingsSheet');
+const helpSheet = getEl<HTMLDialogElement>('helpSheet');
+const sizeSeg = getEl<HTMLDivElement>('sizeSeg');
+const colorsSeg = getEl<HTMLDivElement>('colorsSeg');
+const settingsDone = getEl<HTMLButtonElement>('settingsDone');
+const statMoves = getEl<HTMLElement>('statMoves');
+const statPoints = getEl<HTMLElement>('statPoints');
+const statAvg = getEl<HTMLElement>('statAvg');
+const statCombo = getEl<HTMLElement>('statCombo');
+const aboutEl = getEl<HTMLSpanElement>('about');
+const ambientEl = document.querySelector<HTMLDivElement>('.ambient');
+const topbarEl = stageEl.querySelector<HTMLElement>('.topbar')!;
+const toolbarEl = stageEl.querySelector<HTMLElement>('.toolbar')!;
+const backLinkEl = stageEl.querySelector<HTMLElement>('.back-link')!;
+const paletteInputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="palette"]'));
 
 const cells: HTMLDivElement[] = [];
 const gems: HTMLDivElement[] = [];
 const shapes: HTMLSpanElement[] = [];
 
+aboutEl.textContent = `Zen Match v${__APP_VERSION__}`;
+
+const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+const landscapePhoneQuery = window.matchMedia('(orientation: landscape) and (max-height: 520px)');
+
+function reducedMotion(): boolean {
+  return reducedMotionQuery.matches;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ---------------------------------------------------------------------------
+// Palette
+// ---------------------------------------------------------------------------
+
 const defaultGemColors = [
   '#7ec8e3', '#e07a5f', '#95d5b2', '#f4d35e', '#dda0dd',
   '#e8a87c', '#4ecdc4', '#ff9f43', '#5f6caf', '#ff6b9d'
 ];
-let activeGemColors = [...defaultGemColors];
+const activeGemColors = [...defaultGemColors];
 
 function refreshGemColors(): void {
   const style = getComputedStyle(document.documentElement);
@@ -123,35 +194,118 @@ function refreshGemColors(): void {
   }
 }
 
+function applyPalette(palette: PaletteId): void {
+  if (palette === 'default') {
+    delete document.documentElement.dataset.palette;
+  } else {
+    document.documentElement.dataset.palette = palette;
+  }
+  for (const input of paletteInputs) input.checked = input.value === palette;
+  refreshGemColors();
+}
+
+// ---------------------------------------------------------------------------
+// Number formatting and the score display
+// ---------------------------------------------------------------------------
+
+const compactFormatter = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+const standardFormatter = new Intl.NumberFormat(undefined);
+
+function formatNumber(n: number): string {
+  if (n >= 100000) return compactFormatter.format(n);
+  return standardFormatter.format(n);
+}
+
+let shownScore = 0;
+let targetScore = 0;
+let scoreRaf = 0;
+
+// Eases the displayed number toward the target; retargeting mid-animation just
+// bends the curve, which is what a live cascade needs.
+function setScore(value: number, animate = true): void {
+  targetScore = value;
+  if (!animate || reducedMotion()) {
+    if (scoreRaf) cancelAnimationFrame(scoreRaf);
+    scoreRaf = 0;
+    shownScore = value;
+    scoreEl.textContent = formatNumber(value);
+    return;
+  }
+  if (scoreRaf) return;
+  const step = (): void => {
+    const diff = targetScore - shownScore;
+    if (Math.abs(diff) < 0.6) {
+      shownScore = targetScore;
+      scoreEl.textContent = formatNumber(targetScore);
+      scoreRaf = 0;
+      return;
+    }
+    shownScore += diff * 0.16;
+    scoreEl.textContent = formatNumber(Math.round(shownScore));
+    scoreRaf = requestAnimationFrame(step);
+  };
+  scoreRaf = requestAnimationFrame(step);
+}
+
+function bumpScore(): void {
+  scoreEl.classList.remove('bump');
+  void scoreEl.offsetWidth;
+  scoreEl.classList.add('bump');
+}
+
+function updateStats(): void {
+  const avg = gameState.gameMoves > 0 ? Math.round(gameState.gamePoints / gameState.gameMoves) : 0;
+  statMoves.textContent = formatNumber(gameState.gameMoves);
+  statPoints.textContent = formatNumber(gameState.gamePoints);
+  statAvg.textContent = formatNumber(avg);
+  statCombo.textContent = formatNumber(gameState.maxCombo);
+}
+
+// ---------------------------------------------------------------------------
+// Board layout and rendering
+// ---------------------------------------------------------------------------
+
 function posIdx(r: number, c: number): number {
   return r * config.cols + c;
 }
 
-const compactFormatter = new Intl.NumberFormat(undefined, {
-  notation: 'compact',
-  maximumFractionDigits: 1
-});
-const standardFormatter = new Intl.NumberFormat(undefined);
+function isInBounds(pos: Pos): boolean {
+  return pos.r >= 0 && pos.r < config.rows && pos.c >= 0 && pos.c < config.cols;
+}
 
-function formatNumber(n: number): string {
-  if (n >= 10000) return compactFormatter.format(n);
-  return standardFormatter.format(n);
+function isAdjacent(a: Pos, b: Pos): boolean {
+  const dr = Math.abs(a.r - b.r);
+  const dc = Math.abs(a.c - b.c);
+  return (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
 }
 
 function updateBoardSizing(): void {
-  const isMobile = window.innerWidth <= 480;
-  const boardPadding = isMobile ? 12 : 32; // 6px each side or 16px each side
-  const gap = isMobile ? 1 : 4;
+  const narrow = window.innerWidth <= 480;
+  const boardPadding = (narrow ? 12 : 32) + 2; // padding both sides + 1px border each side
+  const gap = narrow ? 2 : 4;
   const totalGaps = (config.cols - 1) * gap;
-  const availWidth = Math.min(window.innerWidth - 16, 532) - boardPadding - totalGaps;
-  const availHeight = window.innerHeight - 200 - boardPadding - totalGaps;
+  const landscape = landscapePhoneQuery.matches;
+
+  const stageStyle = getComputedStyle(stageEl);
+  const padX = parseFloat(stageStyle.paddingLeft) + parseFloat(stageStyle.paddingRight);
+  const padY = parseFloat(stageStyle.paddingTop) + parseFloat(stageStyle.paddingBottom);
+  const rowGap = parseFloat(stageStyle.rowGap) || 0;
+  const railWidth = landscape ? (parseFloat(stageStyle.getPropertyValue('--rail-w')) || 172) + 20 : 0;
+  const chromeHeight = landscape
+    ? 0
+    : backLinkEl.offsetHeight + topbarEl.offsetHeight + toolbarEl.offsetHeight + rowGap * 3;
+
+  const availWidth = Math.min(window.innerWidth - padX - railWidth, 560) - boardPadding - totalGaps;
+  const availHeight = window.innerHeight - padY - chromeHeight - boardPadding - totalGaps;
   const avail = Math.min(availWidth, availHeight);
   const cellSize = Math.max(18, Math.floor(avail / config.cols));
   const gemSize = cellSize - (cellSize < 28 ? 4 : 6);
+
   boardEl.style.setProperty('--grid-cols', String(config.cols));
   boardEl.style.setProperty('--cell-size', `${cellSize}px`);
   boardEl.style.setProperty('--gem-size', `${gemSize}px`);
   boardEl.style.setProperty('--gem-radius', `${Math.max(2, Math.round(gemSize * 0.18))}px`);
+  boardEl.style.setProperty('--gap', `${gap}px`);
 }
 
 function createGrid(): void {
@@ -165,7 +319,9 @@ function createGrid(): void {
     for (let c = 0; c < config.cols; c++) {
       const cell = document.createElement('div');
       cell.className = 'cell';
-      cell.tabIndex = 0;
+      cell.tabIndex = r === 0 && c === 0 ? 0 : -1;
+      cell.setAttribute('role', 'button');
+      cell.setAttribute('aria-label', `Row ${r + 1}, column ${c + 1}`);
       cell.dataset.row = String(r);
       cell.dataset.col = String(c);
 
@@ -175,7 +331,6 @@ function createGrid(): void {
       const shape = document.createElement('span');
       shape.className = 'gem-shape';
       gem.appendChild(shape);
-
       cell.appendChild(gem);
 
       boardEl.appendChild(cell);
@@ -184,9 +339,6 @@ function createGrid(): void {
       shapes.push(shape);
     }
   }
-
-  // Re-append overlay elements that live inside the board
-  boardEl.appendChild(comboCounterEl);
 }
 
 function renderBoard(board: Board): void {
@@ -210,8 +362,7 @@ function renderBoard(board: Board): void {
       if (cell.special === SPECIAL.BOMB) {
         gemEl.classList.add('special-bomb');
       } else if (cell.special === SPECIAL.LINE) {
-        gemEl.classList.add('special-line');
-        gemEl.classList.add(cell.direction || 'horizontal');
+        gemEl.classList.add('special-line', cell.direction || 'horizontal');
       } else if (cell.special === SPECIAL.RAINBOW) {
         gemEl.classList.add('special-rainbow');
       }
@@ -225,208 +376,62 @@ function renderBoard(board: Board): void {
   }
 }
 
-function getGemDistribution(board: Board): number[] {
-  const counts = new Array(config.gemTypes).fill(0);
-  for (let r = 0; r < config.rows; r++) {
-    for (let c = 0; c < config.cols; c++) {
-      if (board[r][c]) counts[board[r][c]!.type]++;
-    }
-  }
-  return counts;
+function rerender(): void {
+  if (gameState.currentBoard) renderBoard(gameState.currentBoard);
 }
 
-function renderSparkline(history: number[], isLive = false): void {
-  const canvas = avgSparklineEl;
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+// ---------------------------------------------------------------------------
+// Effects
+// ---------------------------------------------------------------------------
 
-  const w = canvas.width;
-  const h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
+let glowTimer: number | undefined;
+let ambientTimer: number | undefined;
 
-  if (history.length > 0) {
-    const min = Math.min(...history);
-    const max = Math.max(...history);
-    const range = max - min || 1;
-
-    if (history.length > 1) {
-      ctx.strokeStyle = 'rgba(149, 213, 178, 0.6)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      history.forEach((val, i) => {
-        const x = (i / (history.length - 1)) * w;
-        const y = h - ((val - min) / range) * h;
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-    }
-
-    const lastVal = history[history.length - 1];
-    const lastX = history.length > 1 ? w : w / 2;
-    const lastY = h - ((lastVal - min) / range) * h;
-    ctx.fillStyle = isLive ? '#95d5b2' : '#f4d35e';
-    ctx.beginPath();
-    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
-    ctx.fill();
-  }
+function boardGlow(): void {
+  boardEl.classList.add('glow');
+  window.clearTimeout(glowTimer);
+  glowTimer = window.setTimeout(() => boardEl.classList.remove('glow'), config.timing.glow);
 }
 
-function distBarHTML(dist: number[]): string {
-  const total = dist.reduce((a, b) => a + b, 0) || 1;
-  return `<div class="dist-bar">${dist.map((count, i) =>
-    `<div class="dist-segment" style="height:${(count / total) * 24}px;background:${activeGemColors[i]}"></div>`
-  ).join('')}</div>`;
+function ambientResponse(): void {
+  if (!ambientEl) return;
+  ambientEl.classList.add('combo-response');
+  window.clearTimeout(ambientTimer);
+  ambientTimer = window.setTimeout(() => ambientEl.classList.remove('combo-response'), config.timing.ambient);
 }
 
-function renderStats(): void {
-  if (distHistoryEl) {
-    distHistoryEl.innerHTML = gameState.distHistory.map(dist => distBarHTML(dist)).join('');
-  }
-
-  renderSparkline(gameState.avgHistory, false);
-
-  scoreHistoryEl.innerHTML = gameState.scoreHistory.map(s => `<span>+${formatNumber(s)}</span>`).join('');
-}
-
-function liveUpdateStats(board: Board): void {
-  if (gameState.pendingPoints > 0) {
-    const projectedAvg = Math.round((gameState.gamePoints + gameState.pendingPoints) / (gameState.gameMoves + 1));
-    avgScoreEl.textContent = formatNumber(projectedAvg);
-
-    const liveHistory = [gameState.pendingPoints, ...gameState.scoreHistory.slice(0, 7)];
-    scoreHistoryEl.innerHTML = liveHistory.map((s, i) =>
-      `<span${i === 0 ? ' class="live"' : ''}>+${formatNumber(s)}</span>`
-    ).join('');
-
-    const liveAvgHistory = [...gameState.avgHistory, projectedAvg];
-    renderSparkline(liveAvgHistory, true);
-  }
-
-  if (distHistoryEl) {
-    distHistoryEl.innerHTML = [...gameState.distHistory, getGemDistribution(board)].slice(-config.maxHistory).map(dist => distBarHTML(dist)).join('');
-  }
-}
-
-function recordMove(board: Board, points: number): void {
-  gameState.distHistory.push(getGemDistribution(board));
-  if (gameState.distHistory.length > config.maxHistory) gameState.distHistory.shift();
-
-  if (points > 0) {
-    gameState.scoreHistory.unshift(points);
-    if (gameState.scoreHistory.length > 8) gameState.scoreHistory.pop();
-
-    gameState.gamePoints += points;
-    gameState.gameMoves++;
-    const currentAvg = Math.round(gameState.gamePoints / gameState.gameMoves);
-    avgScoreEl.textContent = formatNumber(currentAvg);
-    totalScoreEl.textContent = formatNumber(gameState.gamePoints);
-
-    gameState.avgHistory.push(currentAvg);
-    if (gameState.avgHistory.length > config.maxHistory) gameState.avgHistory.shift();
-  }
-
-  renderStats();
-}
-
-function showComboCounter(combo: number): void {
-  if (combo >= 2) {
-    comboCounterEl.textContent = `Combo x${combo}`;
-    comboCounterEl.className = 'combo-counter show';
-    if (combo >= 5) {
-      comboCounterEl.classList.add('epic');
-      if (document.body.dataset.mode !== 'zen') {
-        boardEl.classList.add('combo-flash');
-        setTimeout(() => boardEl.classList.remove('combo-flash'), 600);
-      } else {
-        // Zen mode: ambient orbs respond
-        document.querySelector('.ambient')?.classList.add('combo-response');
-        setTimeout(() => document.querySelector('.ambient')?.classList.remove('combo-response'), 1200);
-      }
-    } else if (combo >= 4) {
-      comboCounterEl.classList.add('hot');
-    } else if (combo >= 3) {
-      comboCounterEl.classList.add('warm');
-    }
-  }
-}
-
-function showScorePopup(points: number, combo: number, positions: Pos[], isBonus = false): void {
-  const popup = document.createElement('div');
-  popup.className = `score-popup${isBonus ? ' bonus' : ''}`;
-
-  const text = combo >= 2 ? `+${formatNumber(points)} x${combo}` : `+${formatNumber(points)}`;
-  popup.textContent = text;
-
-  // Scale font by point value
-  const scale = Math.min(1 + Math.log10(Math.max(points, 10)) * 0.3, 2.5);
-  popup.style.fontSize = `${scale}rem`;
-
-  // Position at centroid of matched positions
-  if (positions.length > 0) {
-    const centroidR = positions.reduce((sum, p) => sum + p.r, 0) / positions.length;
-    const centroidC = positions.reduce((sum, p) => sum + p.c, 0) / positions.length;
-
-    const idx = Math.round(centroidR) * config.cols + Math.round(centroidC);
-    const cell = cells[Math.min(idx, cells.length - 1)];
-    if (cell) {
-      const rect = cell.getBoundingClientRect();
-      const boardRect = boardEl.getBoundingClientRect();
-      popup.style.left = `${rect.left - boardRect.left + rect.width / 2}px`;
-      popup.style.top = `${rect.top - boardRect.top}px`;
-      // Alternate drift direction based on combo count
-      if (combo % 2 === 0) {
-        popup.style.setProperty('--drift', '-30px');
-      }
-    }
-  } else {
-    popup.style.left = '50%';
-    popup.style.top = '45%';
-  }
-
-  boardEl.appendChild(popup);
-  setTimeout(() => popup.remove(), config.timing.scorePopup);
+function cellCenter(r: number, c: number): { x: number; y: number } | null {
+  const cell = cells[posIdx(r, c)];
+  if (!cell) return null;
+  const rect = cell.getBoundingClientRect();
+  const boardRect = boardEl.getBoundingClientRect();
+  return { x: rect.left - boardRect.left + rect.width / 2, y: rect.top - boardRect.top + rect.height / 2 };
 }
 
 function showExplosionEffect(r: number, c: number): void {
-  const idx = r * config.cols + c;
-  const cell = cells[idx];
-  if (!cell) return;
-
-  const rect = cell.getBoundingClientRect();
-  const boardRect = boardEl.getBoundingClientRect();
-
+  const center = cellCenter(r, c);
+  if (!center) return;
   const effect = document.createElement('div');
   effect.className = 'explosion-effect';
-  effect.style.left = `${rect.left - boardRect.left + rect.width / 2}px`;
-  effect.style.top = `${rect.top - boardRect.top + rect.height / 2}px`;
+  effect.style.left = `${center.x}px`;
+  effect.style.top = `${center.y}px`;
   boardEl.appendChild(effect);
-
   setTimeout(() => effect.remove(), 500);
 }
 
 function showLineEffect(effect: Effect): void {
   if (effect.kind !== 'line') return;
-
   const el = document.createElement('div');
   el.className = `line-effect ${effect.direction}`;
+  const boardRect = boardEl.getBoundingClientRect();
 
   if (effect.direction === 'horizontal' && effect.row !== undefined) {
     const cell = cells[effect.row * config.cols];
-    if (cell) {
-      const rect = cell.getBoundingClientRect();
-      const boardRect = boardEl.getBoundingClientRect();
-      el.style.top = `${rect.top - boardRect.top}px`;
-    }
+    if (cell) el.style.top = `${cell.getBoundingClientRect().top - boardRect.top}px`;
   }
-
   if (effect.direction === 'vertical' && effect.col !== undefined) {
     const cell = cells[effect.col];
-    if (cell) {
-      const rect = cell.getBoundingClientRect();
-      const boardRect = boardEl.getBoundingClientRect();
-      el.style.left = `${rect.left - boardRect.left}px`;
-    }
+    if (cell) el.style.left = `${cell.getBoundingClientRect().left - boardRect.left}px`;
   }
 
   boardEl.appendChild(el);
@@ -435,25 +440,18 @@ function showLineEffect(effect: Effect): void {
 
 function showEffects(effects: Effect[]): void {
   for (const effect of effects) {
-    if (effect.kind === 'explosion') {
-      showExplosionEffect(effect.r, effect.c);
-    } else {
-      showLineEffect(effect);
-    }
+    if (effect.kind === 'explosion') showExplosionEffect(effect.r, effect.c);
+    else showLineEffect(effect);
   }
 }
 
 let activeParticles = 0;
 const MAX_PARTICLES = 20;
 
-function spawnParticles(r: number, c: number, color: string, count = 6): void {
-  const idx = posIdx(r, c);
-  const cell = cells[idx];
-  if (!cell) return;
-  const rect = cell.getBoundingClientRect();
-  const boardRect = boardEl.getBoundingClientRect();
-  const cx = rect.left - boardRect.left + rect.width / 2;
-  const cy = rect.top - boardRect.top + rect.height / 2;
+function spawnParticles(r: number, c: number, color: string, count = 4): void {
+  if (reducedMotion()) return;
+  const center = cellCenter(r, c);
+  if (!center) return;
 
   for (let i = 0; i < count && activeParticles < MAX_PARTICLES; i++) {
     activeParticles++;
@@ -463,7 +461,7 @@ function spawnParticles(r: number, c: number, color: string, count = 6): void {
     const tx = Math.cos(angle) * dist;
     const ty = Math.sin(angle) * dist;
     p.className = 'particle';
-    p.style.cssText = `left:${cx}px;top:${cy}px;background:${color};--tx:${tx}px;--ty:${ty}px;`;
+    p.style.cssText = `left:${center.x}px;top:${center.y}px;background:${color};--tx:${tx}px;--ty:${ty}px;`;
     boardEl.appendChild(p);
     p.addEventListener('animationend', () => { p.remove(); activeParticles--; }, { once: true });
   }
@@ -471,22 +469,17 @@ function spawnParticles(r: number, c: number, color: string, count = 6): void {
 
 function applyRemovalAnimations(positions: Pos[], animations: Record<string, RemovalAnim>): void {
   for (const pos of positions) {
-    const idx = posIdx(pos.r, pos.c);
-    const gemEl = gems[idx];
+    const gemEl = gems[posIdx(pos.r, pos.c)];
     if (!gemEl) continue;
-    const key = `${pos.r},${pos.c}`;
-    gemEl.classList.add(animations[key] || 'matched');
-    // Spawn particles matching the gem's color
+    gemEl.classList.add(animations[`${pos.r},${pos.c}`] || 'matched');
     const cell = gameState.currentBoard?.[pos.r]?.[pos.c];
-    if (cell) {
-      spawnParticles(pos.r, pos.c, activeGemColors[cell.type] || '#fff', 4);
-    }
+    if (cell) spawnParticles(pos.r, pos.c, activeGemColors[cell.type] || '#fff');
   }
 }
 
-function isInBounds(pos: Pos): boolean {
-  return pos.r >= 0 && pos.r < config.rows && pos.c >= 0 && pos.c < config.cols;
-}
+// ---------------------------------------------------------------------------
+// Frame playback
+// ---------------------------------------------------------------------------
 
 function cellStepY(): number {
   if (config.rows > 1) {
@@ -504,16 +497,15 @@ async function animateGemMoves(
   staggerMax: number,
   easing = 'cubic-bezier(0.25, 1, 0.5, 1)'
 ): Promise<void> {
-  if (moves.length === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (moves.length === 0 || reducedMotion()) {
     renderBoard(board);
     await sleep(20);
     return;
   }
 
-  const oldRects = moves.map(move => {
-    if (!isInBounds(move.from)) return null;
-    return cells[posIdx(move.from.r, move.from.c)]?.getBoundingClientRect() || null;
-  });
+  const oldRects = moves.map(move =>
+    isInBounds(move.from) ? cells[posIdx(move.from.r, move.from.c)]?.getBoundingClientRect() || null : null
+  );
 
   renderBoard(board);
   const stepY = cellStepY();
@@ -521,16 +513,13 @@ async function animateGemMoves(
   moves.forEach((move, index) => {
     const gemEl = gems[posIdx(move.to.r, move.to.c)];
     if (!gemEl) return;
-
     const newRect = cells[posIdx(move.to.r, move.to.c)].getBoundingClientRect();
     const oldRect = oldRects[index];
     const oldLeft = oldRect ? oldRect.left : newRect.left;
     const oldTop = oldRect ? oldRect.top : newRect.top + (move.from.r - move.to.r) * stepY;
     const dx = oldLeft - newRect.left;
     const dy = oldTop - newRect.top;
-
     if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) return;
-
     gemEl.classList.add('falling');
     gemEl.style.transform = `translate(${dx}px, ${dy}px)`;
     gemEl.style.transition = 'none';
@@ -541,7 +530,6 @@ async function animateGemMoves(
   moves.forEach((move, index) => {
     const gemEl = gems[posIdx(move.to.r, move.to.c)];
     if (!gemEl) return;
-
     const stagger = staggerMax > 0 ? Math.min(staggerMax, index * 18) : 0;
     gemEl.style.transition = `transform ${duration}ms ${easing} ${stagger}ms`;
     gemEl.style.transform = '';
@@ -559,61 +547,49 @@ async function animateGemMoves(
   }
 }
 
-async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>, token: number): Promise<void> {
-  if (!frame.moves || frame.moves.length === 0) {
+async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>): Promise<void> {
+  if (!frame.moves || frame.moves.length === 0 || reducedMotion()) {
     renderBoard(frame.board);
     await sleep(config.timing.shufflePause);
     return;
   }
 
-  // FLIP technique: record old positions, render new, animate from old -> new
   const oldRects = new Map<number, DOMRect>();
   for (const move of frame.moves) {
-    const idx = move.from.r * config.cols + move.from.c;
+    const idx = posIdx(move.from.r, move.from.c);
     const cell = cells[idx];
     if (cell) oldRects.set(idx, cell.getBoundingClientRect());
   }
 
   renderBoard(frame.board);
 
-  // Animate gems from old position to new
   for (const move of frame.moves) {
-    const newIdx = move.to.r * config.cols + move.to.c;
-    const oldIdx = move.from.r * config.cols + move.from.c;
+    const newIdx = posIdx(move.to.r, move.to.c);
     const gemEl = gems[newIdx];
-    const oldRect = oldRects.get(oldIdx);
+    const oldRect = oldRects.get(posIdx(move.from.r, move.from.c));
     if (!gemEl || !oldRect) continue;
-
     const newRect = cells[newIdx].getBoundingClientRect();
     const dx = oldRect.left - newRect.left;
     const dy = oldRect.top - newRect.top;
-
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
       gemEl.style.transform = `translate(${dx}px, ${dy}px)`;
       gemEl.style.transition = 'none';
     }
   }
 
-  // Force layout
   void boardEl.offsetHeight;
 
-  // Animate to final position with staggered timing
   for (const move of frame.moves) {
-    const newIdx = move.to.r * config.cols + move.to.c;
-    const gemEl = gems[newIdx];
+    const gemEl = gems[posIdx(move.to.r, move.to.c)];
     if (!gemEl) continue;
-
-    const stagger = Math.random() * 100;
-    gemEl.style.transition = `transform 600ms cubic-bezier(0.34, 1.56, 0.64, 1) ${stagger}ms`;
+    gemEl.style.transition = `transform 600ms cubic-bezier(0.25, 1, 0.5, 1) ${Math.random() * 100}ms`;
     gemEl.style.transform = '';
   }
 
   await sleep(config.timing.shuffleMove);
 
-  // Cleanup inline styles
   for (const move of frame.moves) {
-    const newIdx = move.to.r * config.cols + move.to.c;
-    const gemEl = gems[newIdx];
+    const gemEl = gems[posIdx(move.to.r, move.to.c)];
     if (gemEl) {
       gemEl.style.transition = '';
       gemEl.style.transform = '';
@@ -621,243 +597,283 @@ async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>, token:
   }
 }
 
-async function playSubSteps(subSteps: RemovalSubStep[], token: number, cascadeSpeed = 1): Promise<void> {
+async function playSubSteps(subSteps: RemovalSubStep[], token: number, pace: number): Promise<void> {
   for (const step of subSteps) {
     if (token !== gameState.runToken) return;
 
-    // Show activation pulse on trigger gem
-    const triggerIdx = step.triggerPos.r * config.cols + step.triggerPos.c;
-    const triggerGem = gems[triggerIdx];
+    const triggerGem = gems[posIdx(step.triggerPos.r, step.triggerPos.c)];
     if (triggerGem) triggerGem.classList.add('activating');
-    await sleep(config.timing.substepTrigger * cascadeSpeed);
+    await sleep(config.timing.substepTrigger * pace);
 
-    // Show the effect
     for (const pos of step.positions) {
-      const idx = pos.r * config.cols + pos.c;
-      const gemEl = gems[idx];
-      const key = `${pos.r},${pos.c}`;
-      if (gemEl) gemEl.classList.add(step.animations[key] || 'matched');
+      const gemEl = gems[posIdx(pos.r, pos.c)];
+      if (gemEl) gemEl.classList.add(step.animations[`${pos.r},${pos.c}`] || 'matched');
     }
     showEffects(step.effects);
-    await sleep(config.timing.substepClear * cascadeSpeed);
+    await sleep(config.timing.substepClear * pace);
 
     if (triggerGem) triggerGem.classList.remove('activating');
   }
 }
 
+// Cascades settle rather than accelerate: each wave is a little slower than the
+// last (350ms base, +8% per wave, capped at 500ms) so a long chain reads as
+// something to watch, not a race.
+function cascadePace(combo: number): number {
+  return Math.min(500, 350 * Math.pow(1.08, combo - 1)) / config.timing.remove;
+}
+
 async function playFrames(frames: Frame[], token: number): Promise<void> {
   let sawShuffle = false;
 
-  for (let i = 0; i < frames.length; i++) {
+  for (const frame of frames) {
     if (token !== gameState.runToken) return;
-    const frame = frames[i];
 
     switch (frame.kind) {
       case 'swap':
         renderBoard(frame.board);
         await sleep(config.timing.swap);
         break;
+
       case 'invalid': {
-        // Determine slide direction from the two positions
-        const p1 = frame.positions[0];
-        const p2 = frame.positions[1];
+        const [p1, p2] = frame.positions;
         const dr = p2.r - p1.r;
         const dc = p2.c - p1.c;
-
         for (const pos of frame.positions) {
-          const idx = posIdx(pos.r, pos.c);
-          const gemEl = gems[idx];
-          if (gemEl) {
-            // First gem slides toward second, second slides toward first
-            const isFirst = pos.r === p1.r && pos.c === p1.c;
-            const slideR = isFirst ? dr : -dr;
-            const slideC = isFirst ? dc : -dc;
-            gemEl.style.setProperty('--slide-x', `${slideC * 12}px`);
-            gemEl.style.setProperty('--slide-y', `${slideR * 12}px`);
-            gemEl.classList.add('invalid');
-          }
+          const gemEl = gems[posIdx(pos.r, pos.c)];
+          if (!gemEl) continue;
+          const isFirst = pos.r === p1.r && pos.c === p1.c;
+          gemEl.style.setProperty('--slide-x', `${(isFirst ? dc : -dc) * 12}px`);
+          gemEl.style.setProperty('--slide-y', `${(isFirst ? dr : -dr) * 12}px`);
+          gemEl.classList.add('invalid');
         }
         await sleep(config.timing.invalid);
         break;
       }
-      case 'remove': {
-        let cascadeSpeed: number;
-        if (document.body.dataset.mode === 'zen') {
-          // Zen: decelerate (each step slower), 350ms base, +8% per combo, cap 500ms
-          const zenBase = 350;
-          cascadeSpeed = Math.min(500, zenBase * Math.pow(1.08, frame.score.combo - 1)) / config.timing.remove;
-        } else {
-          // Classic: accelerate (each step faster)
-          cascadeSpeed = Math.max(0.6, Math.pow(0.92, frame.score.combo - 1));
-        }
-        showComboCounter(frame.score.combo);
-        showScorePopup(frame.score.points, frame.score.combo, frame.positions, frame.score.isBonus);
-        gameState.pendingPoints += frame.score.points;
-        liveUpdateStats(gameState.currentBoard!);
 
-        // Phase 5B: If sub-steps exist, play them sequentially
+      case 'remove': {
+        const pace = cascadePace(frame.score.combo);
+        gameState.pendingPoints += frame.score.points;
+        gameState.maxCombo = Math.max(gameState.maxCombo, frame.score.combo);
+        setScore(gameState.gamePoints + gameState.pendingPoints);
+        bumpScore();
+        if (frame.score.combo >= 3) boardGlow();
+        if (frame.score.combo >= 5) ambientResponse();
+
         if (frame.subSteps && frame.subSteps.length > 0) {
-          // Collect positions that subSteps will animate later
           const subStepKeys = new Set<string>();
           for (const step of frame.subSteps) {
-            for (const pos of step.positions) {
-              subStepKeys.add(`${pos.r},${pos.c}`);
-            }
+            for (const pos of step.positions) subStepKeys.add(`${pos.r},${pos.c}`);
           }
-          // Only animate initially matched positions, not chain-reaction victims
+          // Only the directly matched gems animate now; chain-reaction victims
+          // animate when their sub-step fires.
           const initialPositions = frame.positions.filter(pos => !subStepKeys.has(`${pos.r},${pos.c}`));
           applyRemovalAnimations(initialPositions, frame.animations);
-          await sleep(config.timing.substepClear * cascadeSpeed);
-          // Then play special activation sequences (which animate blast victims)
-          await playSubSteps(frame.subSteps, token, cascadeSpeed);
+          await sleep(config.timing.substepClear * pace);
+          await playSubSteps(frame.subSteps, token, pace);
         } else {
           applyRemovalAnimations(frame.positions, frame.animations);
           showEffects(frame.effects);
-          await sleep(config.timing.remove * cascadeSpeed);
+          await sleep(config.timing.remove * pace);
         }
         break;
       }
+
       case 'board': {
         renderBoard(frame.board);
-        // Phase 5E: Longer pause and animation when new specials appear
         if (frame.newSpecials && frame.newSpecials.length > 0) {
-          for (const pos of frame.newSpecials) {
-            const idx = pos.r * config.cols + pos.c;
-            const gemEl = gems[idx];
-            if (gemEl) gemEl.classList.add('just-created');
-          }
+          for (const pos of frame.newSpecials) gems[posIdx(pos.r, pos.c)]?.classList.add('just-created');
           await sleep(config.timing.specialCreated);
-          for (const pos of frame.newSpecials) {
-            const idx = pos.r * config.cols + pos.c;
-            const gemEl = gems[idx];
-            if (gemEl) gemEl.classList.remove('just-created');
-          }
+          for (const pos of frame.newSpecials) gems[posIdx(pos.r, pos.c)]?.classList.remove('just-created');
         } else {
           await sleep(config.timing.boardSync);
         }
         break;
       }
+
       case 'drop':
         await animateGemMoves(frame.board, frame.moves, config.timing.drop, 90);
         break;
+
       case 'fill':
         await animateGemMoves(frame.board, frame.moves, config.timing.fill, 120, 'cubic-bezier(0.22, 0.95, 0.36, 1)');
         break;
+
       case 'preview':
-        // Phase 5A: Trembling preview of pending matches
         renderBoard(frame.board);
-        for (const pos of frame.pendingPositions) {
-          const idx = pos.r * config.cols + pos.c;
-          const gemEl = gems[idx];
-          if (gemEl) gemEl.classList.add('pending-match');
-        }
+        for (const pos of frame.pendingPositions) gems[posIdx(pos.r, pos.c)]?.classList.add('pending-match');
         await sleep(config.timing.preview);
-        for (const pos of frame.pendingPositions) {
-          const idx = pos.r * config.cols + pos.c;
-          const gemEl = gems[idx];
-          if (gemEl) gemEl.classList.remove('pending-match');
-        }
+        for (const pos of frame.pendingPositions) gems[posIdx(pos.r, pos.c)]?.classList.remove('pending-match');
         break;
+
       case 'shuffle':
         if (!sawShuffle) {
-          shuffleNotice.classList.add('show');
+          showToast('No moves left. Reshuffling.', 0);
           sawShuffle = true;
         }
-        await animateShuffle(frame, token);
+        await animateShuffle(frame);
         break;
+
       default:
         break;
     }
   }
 
-  if (sawShuffle) {
-    shuffleNotice.classList.remove('show');
-  }
+  if (sawShuffle) hideToast();
 }
 
-function showFloatingMessage(text: string): void {
-  floatingMessage.textContent = text;
-  floatingMessage.classList.add('visible');
+// ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+
+let toastTimer: number | undefined;
+
+function showToast(text: string, ms = 2600): void {
+  toastEl.textContent = text;
+  toastEl.classList.add('show');
+  window.clearTimeout(toastTimer);
+  if (ms > 0) toastTimer = window.setTimeout(hideToast, ms);
 }
 
-function hideFloatingMessage(): void {
-  floatingMessage.classList.remove('visible');
+function hideToast(): void {
+  window.clearTimeout(toastTimer);
+  toastEl.classList.remove('show');
+}
+
+// ---------------------------------------------------------------------------
+// Game lifecycle
+// ---------------------------------------------------------------------------
+
+function saveGame(): void {
+  store.set(
+    KEYS.game,
+    serializeGame({
+      rows: config.rows,
+      cols: config.cols,
+      gemTypes: config.gemTypes,
+      board: engine.state.board,
+      points: gameState.gamePoints,
+      moves: gameState.gameMoves,
+      maxCombo: gameState.maxCombo
+    })
+  );
 }
 
 function resetStats(): void {
   gameState.gamePoints = 0;
   gameState.gameMoves = 0;
   gameState.pendingPoints = 0;
+  gameState.maxCombo = 0;
   gameState.selected = null;
-  avgScoreEl.textContent = '0';
-  totalScoreEl.textContent = '0';
-  gameState.distHistory = [];
-  gameState.scoreHistory = [];
-  gameState.avgHistory = [];
-  comboCounterEl.classList.remove('show');
+  setScore(0, false);
+  updateStats();
 }
 
-function startNewGame(): void {
-  // Belt-and-braces: a superseded in-flight move clears these in its own `finally`,
-  // but a new game must never inherit a locked board.
+function syncUrl(): void {
+  const url = new URL(window.location.toString());
+  if (config.gemTypes === LIMITS.gems.default) url.searchParams.delete('gems');
+  else url.searchParams.set('gems', String(config.gemTypes));
+  if (config.gridSize === LIMITS.grid.default) url.searchParams.delete('grid');
+  else url.searchParams.set('grid', String(config.gridSize));
+  history.replaceState({}, '', url);
+}
+
+function dissolveBoard(): Promise<void> {
+  gems.forEach((gemEl, i) => {
+    if (gemEl.classList.contains('empty')) return;
+    gemEl.style.setProperty('--d', `${(i % config.cols) * 10 + Math.random() * 90}ms`);
+    gemEl.classList.add('dissolve');
+  });
+  return sleep(config.timing.dissolve);
+}
+
+function reformBoard(): void {
+  if (reducedMotion()) return;
+  gems.forEach((gemEl, i) => {
+    gemEl.style.setProperty('--d', `${Math.floor(i / config.cols) * 22 + (i % config.cols) * 8}ms`);
+    gemEl.classList.add('reform');
+  });
+  setTimeout(() => {
+    for (const gemEl of gems) {
+      gemEl.classList.remove('reform');
+      gemEl.style.removeProperty('--d');
+    }
+  }, config.timing.reform + 500);
+}
+
+async function startNewGame(options: { transition?: boolean } = {}): Promise<void> {
+  // Supersede any in-flight move: playFrames bails out at its next frame and
+  // trySwap's finally block clears the lock. Belt and braces below.
+  gameState.runToken++;
   gameState.isProcessing = false;
   boardEl.classList.remove('processing');
+  boardEl.removeAttribute('aria-busy');
 
-  const newUrl = new URL(window.location.toString());
+  const transition = options.transition !== false && !reducedMotion() && gameState.currentBoard !== null;
+  if (transition) await dissolveBoard();
+
   let needsGridRebuild = false;
-
-  if (config.pendingGemTypes !== config.gemTypes) {
-    config.gemTypes = config.pendingGemTypes;
-    if (config.gemTypes === 5) {
-      newUrl.searchParams.delete('gems');
-    } else {
-      newUrl.searchParams.set('gems', config.gemTypes.toString());
-    }
+  if (settings.gemTypes !== config.gemTypes) {
+    config.gemTypes = settings.gemTypes;
   }
-
-  if (config.pendingGridSize !== config.gridSize) {
-    config.gridSize = config.pendingGridSize;
-    config.rows = config.gridSize;
-    config.cols = config.gridSize;
+  if (settings.gridSize !== config.gridSize) {
+    config.gridSize = settings.gridSize;
+    config.rows = settings.gridSize;
+    config.cols = settings.gridSize;
     needsGridRebuild = true;
-    if (config.gridSize === 8) {
-      newUrl.searchParams.delete('grid');
-    } else {
-      newUrl.searchParams.set('grid', config.gridSize.toString());
-    }
   }
+  syncUrl();
 
-  history.replaceState({}, '', newUrl);
-
-  if (!config.seedLocked) {
-    config.seed = Date.now();
-  }
-
+  if (!config.seedLocked) config.seed = Date.now();
   engine.reset({ rows: config.rows, cols: config.cols, gemTypes: config.gemTypes, seed: config.seed });
 
-  if (needsGridRebuild) {
-    createGrid();
-  }
+  if (needsGridRebuild) createGrid();
 
   const board = engine.init();
   resetStats();
   renderBoard(board);
-  gameState.distHistory = [getGemDistribution(board)];
-  renderStats();
-  hideFloatingMessage();
-  resetHintTimer();
-  // Reset session timer for zen mode hue shift
-  sessionStart = Date.now();
+  saveGame();
+  reformBoard();
+}
+
+// Resume the last settled board when it matches the current settings. A seeded
+// URL is a request for a specific fresh board, so it never resumes.
+function tryResume(): boolean {
+  if (config.seedLocked) return false;
+  const saved = parseSavedGame(store.get(KEYS.game), { rows: config.rows, cols: config.cols, gemTypes: config.gemTypes });
+  if (!saved) return false;
+
+  engine.reset({ rows: config.rows, cols: config.cols, gemTypes: config.gemTypes, seed: config.seed });
+  engine.setBoard(saved.board);
+  gameState.gamePoints = saved.points;
+  gameState.gameMoves = saved.moves;
+  gameState.maxCombo = saved.maxCombo;
+  gameState.pendingPoints = 0;
+  gameState.selected = null;
+  setScore(saved.points, false);
+  updateStats();
+  renderBoard(cloneBoard(saved.board));
+  syncUrl();
+  reformBoard();
+  return true;
+}
+
+function recordMove(points: number): void {
+  if (points > 0) {
+    gameState.gamePoints += points;
+    gameState.gameMoves++;
+  }
+  setScore(gameState.gamePoints);
+  updateStats();
+  saveGame();
 }
 
 async function trySwap(pos1: Pos, pos2: Pos): Promise<void> {
   if (gameState.isProcessing) return;
 
-  clearHint();
-  clearTimeout(hintTimer);
-
   gameState.isProcessing = true;
   boardEl.classList.add('processing');
+  boardEl.setAttribute('aria-busy', 'true');
   gameState.pendingPoints = 0;
   const localToken = ++gameState.runToken;
 
@@ -865,59 +881,42 @@ async function trySwap(pos1: Pos, pos2: Pos): Promise<void> {
   try {
     await playFrames(result.frames, localToken);
   } finally {
-    // Must run even when a New Game superseded this move. Without it the class
-    // stuck on and CSS pointer-events:none left the board permanently unclickable.
+    // Must run even when a New Game superseded this move, or the board stays
+    // locked behind pointer-events: none.
     boardEl.classList.remove('processing');
+    boardEl.removeAttribute('aria-busy');
   }
 
   if (localToken !== gameState.runToken) return;
 
   gameState.isProcessing = false;
-  recordMove(engine.state.board, result.pointsEarned);
   gameState.pendingPoints = 0;
-
-  setTimeout(() => {
-    comboCounterEl.classList.remove('show');
-  }, config.timing.comboHide);
-
-  resetHintTimer();
+  recordMove(result.pointsEarned);
 }
 
-function isAdjacent(a: Pos, b: Pos): boolean {
-  const dr = Math.abs(a.r - b.r);
-  const dc = Math.abs(a.c - b.c);
-  return (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
-}
+// ---------------------------------------------------------------------------
+// Input: pointer and keyboard
+// ---------------------------------------------------------------------------
 
-let hintTimer: number | undefined;
-let hintedCells: number[] = [];
-let hintsEnabled = localStorage.getItem('zen-match-hints') === 'on';
+function activateCell(pos: Pos): void {
+  if (gameState.isProcessing) return;
+  const selected = gameState.selected;
 
-function clearHint(): void {
-  for (const idx of hintedCells) {
-    gems[idx]?.classList.remove('hint-glow');
+  if (selected && selected.r === pos.r && selected.c === pos.c) {
+    gameState.selected = null;
+    rerender();
+    return;
   }
-  hintedCells = [];
-}
 
-function showHint(): void {
-  if (gameState.isProcessing || !hintsEnabled) return;
-  clearHint();
-  const move = engine.findValidMove();
-  if (!move) return;
-  const idx1 = posIdx(move.r1, move.c1);
-  const idx2 = posIdx(move.r2, move.c2);
-  gems[idx1]?.classList.add('hint-glow');
-  gems[idx2]?.classList.add('hint-glow');
-  hintedCells = [idx1, idx2];
-}
-
-function resetHintTimer(): void {
-  clearTimeout(hintTimer);
-  clearHint();
-  if (hintsEnabled) {
-    hintTimer = window.setTimeout(showHint, 6000);
+  if (selected && isAdjacent(selected, pos)) {
+    gameState.selected = null;
+    rerender();
+    void trySwap(selected, pos);
+    return;
   }
+
+  gameState.selected = pos;
+  rerender();
 }
 
 let pointerId: number | null = null;
@@ -926,239 +925,287 @@ let dragTriggered = false;
 const dragThreshold = 16;
 const dragTimeGate = 120;
 
-boardEl.addEventListener('pointerdown', (event: PointerEvent) => {
-  if (gameState.isProcessing) return;
+function cellFromEvent(event: Event): Pos | null {
   const target = event.target as HTMLElement | null;
   const cell = target?.closest('.cell') as HTMLDivElement | null;
-  if (!cell) return;
+  if (!cell) return null;
+  return { r: Number(cell.dataset.row), c: Number(cell.dataset.col) };
+}
+
+boardEl.addEventListener('pointerdown', (event: PointerEvent) => {
+  if (gameState.isProcessing) return;
+  const pos = cellFromEvent(event);
+  if (!pos) return;
 
   event.preventDefault();
-  resetHintTimer();
-  const r = Number(cell.dataset.row);
-  const c = Number(cell.dataset.col);
   pointerId = event.pointerId;
-  pointerStart = { pos: { r, c }, x: event.clientX, y: event.clientY, time: performance.now() };
+  pointerStart = { pos, x: event.clientX, y: event.clientY, time: performance.now() };
   dragTriggered = false;
   boardEl.setPointerCapture(event.pointerId);
-
-  const gemIdx = posIdx(r, c);
-  const gemEl = gems[gemIdx];
-  if (gemEl) gemEl.classList.add('touching');
+  gems[posIdx(pos.r, pos.c)]?.classList.add('touching');
 });
 
 boardEl.addEventListener('pointermove', (event: PointerEvent) => {
-  if (!pointerStart || gameState.isProcessing) return;
-  if (pointerId !== event.pointerId) return;
+  if (!pointerStart || gameState.isProcessing || pointerId !== event.pointerId) return;
 
   const dx = event.clientX - pointerStart.x;
   const dy = event.clientY - pointerStart.y;
   const distance = Math.hypot(dx, dy);
   const elapsed = performance.now() - pointerStart.time;
-
   if (distance < dragThreshold || elapsed < dragTimeGate || dragTriggered) return;
 
   const horizontal = Math.abs(dx) > Math.abs(dy);
   const start = pointerStart.pos;
   const target: Pos = {
-    r: start.r + (horizontal ? 0 : (dy > 0 ? 1 : -1)),
+    r: start.r + (horizontal ? 0 : dy > 0 ? 1 : -1),
     c: start.c + (horizontal ? (dx > 0 ? 1 : -1) : 0)
   };
-
-  if (target.r < 0 || target.r >= config.rows || target.c < 0 || target.c >= config.cols) {
-    return;
-  }
+  if (!isInBounds(target)) return;
 
   dragTriggered = true;
-  // Remove touch feedback on drag
-  const dragIdx = posIdx(start.r, start.c);
-  gems[dragIdx]?.classList.remove('touching');
+  gems[posIdx(start.r, start.c)]?.classList.remove('touching');
   gameState.selected = null;
-  renderBoard(gameState.currentBoard!);
+  rerender();
   void trySwap(start, target);
 });
 
 boardEl.addEventListener('pointerup', (event: PointerEvent) => {
   if (!pointerStart || pointerId !== event.pointerId) return;
 
-  // Remove touch feedback
-  const prevIdx = posIdx(pointerStart.pos.r, pointerStart.pos.c);
-  gems[prevIdx]?.classList.remove('touching');
-
+  gems[posIdx(pointerStart.pos.r, pointerStart.pos.c)]?.classList.remove('touching');
   boardEl.releasePointerCapture(event.pointerId);
   pointerId = null;
 
-  if (dragTriggered) {
-    pointerStart = null;
-    return;
-  }
-
-  if (gameState.isProcessing) {
-    pointerStart = null;
-    return;
-  }
-
   const start = pointerStart.pos;
+  const wasDrag = dragTriggered;
   pointerStart = null;
+  dragTriggered = false;
+  if (wasDrag) return;
 
-  if (gameState.selected && gameState.selected.r === start.r && gameState.selected.c === start.c) {
-    gameState.selected = null;
-    renderBoard(gameState.currentBoard!);
-    return;
-  }
-
-  if (gameState.selected && isAdjacent(gameState.selected, start)) {
-    const from = gameState.selected;
-    gameState.selected = null;
-    renderBoard(gameState.currentBoard!);
-    void trySwap(from, start);
-    return;
-  }
-
-  gameState.selected = start;
-  renderBoard(gameState.currentBoard!);
+  activateCell(start);
 });
 
 boardEl.addEventListener('pointercancel', (event: PointerEvent) => {
-  if (pointerId === event.pointerId) {
-    if (pointerStart) {
-      const prevIdx = posIdx(pointerStart.pos.r, pointerStart.pos.c);
-      gems[prevIdx]?.classList.remove('touching');
-    }
-    pointerId = null;
-    pointerStart = null;
-    dragTriggered = false;
+  if (pointerId !== event.pointerId) return;
+  if (pointerStart) gems[posIdx(pointerStart.pos.r, pointerStart.pos.c)]?.classList.remove('touching');
+  pointerId = null;
+  pointerStart = null;
+  dragTriggered = false;
+});
+
+const arrowDeltas: Record<string, [number, number]> = {
+  ArrowUp: [-1, 0],
+  ArrowDown: [1, 0],
+  ArrowLeft: [0, -1],
+  ArrowRight: [0, 1]
+};
+
+boardEl.addEventListener('keydown', (event: KeyboardEvent) => {
+  const pos = cellFromEvent(event);
+  if (!pos) return;
+
+  const delta = arrowDeltas[event.key];
+  if (delta) {
+    event.preventDefault();
+    const next = { r: pos.r + delta[0], c: pos.c + delta[1] };
+    if (!isInBounds(next)) return;
+    cells[posIdx(pos.r, pos.c)].tabIndex = -1;
+    const target = cells[posIdx(next.r, next.c)];
+    target.tabIndex = 0;
+    target.focus();
+    return;
+  }
+
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    activateCell(pos);
   }
 });
 
-newGameBtn.addEventListener('click', () => {
-  if (gameState.isProcessing) {
-    gameState.runToken++;
-    gameState.isProcessing = false;
-    setTimeout(startNewGame, 100);
-    return;
+// ---------------------------------------------------------------------------
+// Sheets
+// ---------------------------------------------------------------------------
+
+function openSheet(sheet: HTMLDialogElement): void {
+  if (sheet.open) return;
+  sheet.showModal();
+  // Focus the panel itself rather than the close button, which otherwise
+  // opens every sheet with a focus ring on the X.
+  sheet.querySelector<HTMLElement>('.sheet-body')?.focus({ preventScroll: true });
+  if (reducedMotion()) {
+    sheet.classList.add('open');
+  } else {
+    requestAnimationFrame(() => requestAnimationFrame(() => sheet.classList.add('open')));
   }
-  startNewGame();
+}
+
+function closeSheet(sheet: HTMLDialogElement): void {
+  if (!sheet.open) return;
+  sheet.classList.remove('open');
+  const finish = (): void => {
+    if (sheet.open) sheet.close();
+  };
+  if (reducedMotion()) finish();
+  else setTimeout(finish, 260);
+}
+
+function wireSheet(sheet: HTMLDialogElement, onDismiss?: () => void): void {
+  sheet.addEventListener('cancel', event => {
+    event.preventDefault();
+    onDismiss?.();
+    closeSheet(sheet);
+  });
+  sheet.addEventListener('click', event => {
+    if (event.target === sheet) {
+      onDismiss?.();
+      closeSheet(sheet);
+    }
+  });
+  for (const btn of sheet.querySelectorAll<HTMLButtonElement>('[data-close]')) {
+    btn.addEventListener('click', () => {
+      onDismiss?.();
+      closeSheet(sheet);
+    });
+  }
+}
+
+// Settings ------------------------------------------------------------------
+
+const SIZE_PRESETS = [6, 8, 10, 12];
+const COLOR_PRESETS = [4, 5, 6, 7];
+
+const pending = { gridSize: settings.gridSize, gemTypes: settings.gemTypes };
+
+function renderSegments(container: HTMLElement, name: string, presets: number[], current: number, label: (v: number) => string): void {
+  // A value set from the URL that is not a preset still gets a segment so the
+  // control always reflects the truth.
+  const values = presets.includes(current) ? presets : [...presets, current].sort((a, b) => a - b);
+  container.innerHTML = values
+    .map(v => `<label><input type="radio" name="${name}" value="${v}"${v === current ? ' checked' : ''}><span>${label(v)}</span></label>`)
+    .join('');
+}
+
+function syncSettingsUI(): void {
+  renderSegments(sizeSeg, 'size', SIZE_PRESETS, pending.gridSize, v => `${v}×${v}`);
+  renderSegments(colorsSeg, 'colors', COLOR_PRESETS, pending.gemTypes, v => String(v));
+  updateApplyState();
+  updateStats();
+}
+
+function updateApplyState(): void {
+  const dirty = pending.gridSize !== config.gridSize || pending.gemTypes !== config.gemTypes;
+  settingsDone.textContent = dirty ? 'Start new game' : 'Done';
+  settingsDone.classList.toggle('btn-primary', dirty);
+}
+
+function revertPending(): void {
+  pending.gridSize = config.gridSize;
+  pending.gemTypes = config.gemTypes;
+}
+
+sizeSeg.addEventListener('change', event => {
+  const input = event.target as HTMLInputElement;
+  pending.gridSize = Number(input.value);
+  updateApplyState();
 });
+
+colorsSeg.addEventListener('change', event => {
+  const input = event.target as HTMLInputElement;
+  pending.gemTypes = Number(input.value);
+  updateApplyState();
+});
+
+for (const input of paletteInputs) {
+  input.addEventListener('change', () => {
+    if (!input.checked) return;
+    settings.palette = input.value as PaletteId;
+    persistSettings();
+    applyPalette(settings.palette);
+    rerender();
+  });
+}
+
+settingsDone.addEventListener('click', () => {
+  const dirty = pending.gridSize !== config.gridSize || pending.gemTypes !== config.gemTypes;
+  closeSheet(settingsSheet);
+  if (!dirty) return;
+  settings.gridSize = pending.gridSize;
+  settings.gemTypes = pending.gemTypes;
+  persistSettings();
+  void startNewGame();
+});
+
+wireSheet(settingsSheet, () => {
+  revertPending();
+  syncSettingsUI();
+});
+wireSheet(helpSheet);
 
 settingsBtn.addEventListener('click', () => {
-  settingsPanel.classList.toggle('open');
+  revertPending();
+  syncSettingsUI();
+  openSheet(settingsSheet);
 });
 
-gemSlider.value = config.gemTypes.toString();
-gemSliderValue.textContent = config.gemTypes.toString();
-gridSlider.value = config.gridSize.toString();
-gridSliderValue.textContent = `${config.gridSize}x${config.gridSize}`;
-let floatingMessageTimeout: number | undefined;
+helpBtn.addEventListener('click', () => openSheet(helpSheet));
 
-function showSliderChangeMessage(): void {
-  if (config.pendingGemTypes !== config.gemTypes || config.pendingGridSize !== config.gridSize) {
-    showFloatingMessage('New Game to apply');
-    if (floatingMessageTimeout) window.clearTimeout(floatingMessageTimeout);
-    floatingMessageTimeout = window.setTimeout(hideFloatingMessage, 3000);
-  } else {
-    hideFloatingMessage();
-  }
+newGameBtn.addEventListener('click', () => {
+  void startNewGame();
+});
+
+// ---------------------------------------------------------------------------
+// Ambient drift, resize, first visit
+// ---------------------------------------------------------------------------
+
+// The background orbs drift slowly through hue over a long session (2° per
+// minute, capped at 40°). Only the orbs: gem colours are never touched.
+function updateDrift(): void {
+  if (!ambientEl) return;
+  const minutes = (Date.now() - sessionStart) / 60000;
+  ambientEl.style.setProperty('--drift', `${Math.min(minutes * 2, 40).toFixed(1)}deg`);
 }
 
-gemSlider.addEventListener('input', () => {
-  const newValue = parseInt(gemSlider.value, 10);
-  gemSliderValue.textContent = newValue.toString();
-  config.pendingGemTypes = newValue;
-  showSliderChangeMessage();
-});
+setInterval(updateDrift, 60000);
 
-gridSlider.addEventListener('input', () => {
-  const newValue = parseInt(gridSlider.value, 10);
-  gridSliderValue.textContent = `${newValue}x${newValue}`;
-  config.pendingGridSize = newValue;
-  showSliderChangeMessage();
-});
-
-paletteSelect.addEventListener('change', () => {
-  const palette = paletteSelect.value;
-  if (palette === 'default') {
-    delete document.documentElement.dataset.palette;
-  } else {
-    document.documentElement.dataset.palette = palette;
-  }
-  localStorage.setItem('zen-match-palette', palette);
-  refreshGemColors();
-  renderBoard(gameState.currentBoard!);
-  renderStats();
-});
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+let resizeRaf = 0;
+function scheduleSizing(): void {
+  if (resizeRaf) return;
+  resizeRaf = requestAnimationFrame(() => {
+    resizeRaf = 0;
+    updateBoardSizing();
+  });
 }
 
-window.addEventListener('resize', updateBoardSizing);
+window.addEventListener('resize', scheduleSizing);
 
-function showOnboarding(): void {
-  if (localStorage.getItem('zen-match-visited')) return;
+// The first measurement can run before the page has a settled layout (fonts,
+// viewport), so measure again once the first frame has painted and once the
+// web font has swapped in. Re-measuring is idempotent and cheap.
+window.addEventListener('load', scheduleSizing);
+document.fonts?.ready.then(scheduleSizing);
 
-  const tip = document.createElement('div');
-  tip.className = 'onboarding-tip';
-  tip.textContent = 'Swap adjacent gems to match 3 or more';
-  boardEl.appendChild(tip);
-
-  const dismiss = () => {
-    tip.remove();
-    localStorage.setItem('zen-match-visited', '1');
+function showFirstVisitTip(): void {
+  if (store.get(KEYS.visited)) return;
+  showToast('Swap two gems to line up three of a kind', 0);
+  const dismiss = (): void => {
+    hideToast();
+    store.set(KEYS.visited, '1');
     document.removeEventListener('pointerdown', dismiss);
+    document.removeEventListener('keydown', dismiss);
   };
-
-  // Dismiss on any tap after a short delay
-  setTimeout(() => document.addEventListener('pointerdown', dismiss), 500);
+  setTimeout(() => {
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', dismiss);
+  }, 500);
 }
 
-// Load saved mode (default is zen)
-const savedMode = localStorage.getItem('zen-match-mode') || 'zen';
-if (savedMode === 'classic') {
-  document.body.dataset.mode = 'classic';
-  modeToggle.checked = true;
-} else {
-  document.body.dataset.mode = 'zen';
-}
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
 
-modeToggle.addEventListener('change', () => {
-  const mode = modeToggle.checked ? 'classic' : 'zen';
-  document.body.dataset.mode = mode;
-  localStorage.setItem('zen-match-mode', mode);
-  updateSessionHue();
-});
-
-const hintsToggle = getEl<HTMLInputElement>('hintsToggle');
-hintsToggle.checked = hintsEnabled;
-hintsToggle.addEventListener('change', () => {
-  hintsEnabled = hintsToggle.checked;
-  localStorage.setItem('zen-match-hints', hintsEnabled ? 'on' : 'off');
-  if (!hintsEnabled) clearHint();
-  else resetHintTimer();
-});
-
-// T44: Session-length awareness (zen mode only)
-function updateSessionHue(): void {
-  if (document.body.dataset.mode !== 'zen') {
-    // Clear it, don't just skip: switching to classic mid-session otherwise left
-    // the whole page hue-rotated indefinitely.
-    document.body.style.filter = '';
-    return;
-  }
-  const elapsed = (Date.now() - sessionStart) / 1000 / 60; // minutes
-  const degrees = Math.min(elapsed * 2, 40); // 2 deg/min, cap 40
-  document.body.style.filter = degrees > 0.5 ? `hue-rotate(${degrees}deg)` : '';
-}
-
-setInterval(updateSessionHue, 60000);
-
-// Load saved palette before refreshGemColors reads CSS custom properties
-const savedPalette = localStorage.getItem('zen-match-palette') || 'default';
-if (savedPalette !== 'default') {
-  document.documentElement.dataset.palette = savedPalette;
-  paletteSelect.value = savedPalette;
-}
-
-refreshGemColors();
+applyPalette(settings.palette);
 createGrid();
-startNewGame();
-showOnboarding();
+if (!tryResume()) {
+  void startNewGame({ transition: false });
+}
+showFirstVisitTip();

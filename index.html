@@ -4,97 +4,209 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Zen Match</title>
+  <meta name="description" content="A calm match-3. Swap gems, watch the cascades unfold, and breathe. No timers, no pressure, nothing to lose.">
+  <meta name="theme-color" content="#0f1222">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Zen Match">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Zen Match">
+  <meta property="og:title" content="Zen Match">
+  <meta property="og:description" content="A calm match-3. Swap gems, watch the cascades unfold, and breathe.">
+  <meta property="og:url" content="https://zen.ghsj.me/">
+  <meta property="og:image" content="https://zen.ghsj.me/icons/og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="dist/app.css">
 </head>
 <body>
-  <a href="https://ghsj.me" class="back-link">&larr; ghsj.me</a>
-  <div class="ambient"></div>
-  <div class="container">
-    <h1>Zen Match</h1>
-    <div class="controls-row">
-      <button class="new-game-btn" id="newGame">New Game</button>
-      <div class="score-display">
-        <span id="totalScore">0</span>
-        <span class="score-label">pts</span>
-      </div>
-      <button class="settings-btn" id="settingsBtn" aria-label="Settings">&#9881;</button>
-    </div>
-    <div class="settings-panel" id="settingsPanel">
-      <div class="gem-slider-container">
-        <span class="gem-slider-label">Gems</span>
-        <input type="range" id="gemSlider" min="2" max="10" value="5" class="gem-slider">
-        <span class="gem-slider-value" id="gemSliderValue">5</span>
-      </div>
-      <div class="gem-slider-container">
-        <span class="gem-slider-label">Grid</span>
-        <input type="range" id="gridSlider" min="4" max="16" value="8" class="gem-slider">
-        <span class="gem-slider-value" id="gridSliderValue">8x8</span>
-      </div>
-      <div class="gem-slider-container">
-        <select id="paletteSelect" class="palette-select">
-          <option value="default">Colors</option>
-          <option value="redgreen">RG-Safe</option>
-          <option value="highcontrast">Hi-Con</option>
-        </select>
-      </div>
-      <div class="avg-display">Avg/Move: <span id="avgScore" aria-live="polite" role="status">0</span></div>
-      <div class="mode-toggle-container">
-        <label class="mode-toggle">
-          <input type="checkbox" id="modeToggle">
-          <span class="mode-label">Classic Mode</span>
-        </label>
-        <label class="mode-toggle">
-          <input type="checkbox" id="hintsToggle" checked>
-          <span class="mode-label">Hints</span>
-        </label>
-      </div>
-    </div>
-    <div class="floating-message" id="floatingMessage"></div>
-    <div class="board" id="board" aria-label="Game board" role="grid">
-      <div class="combo-counter" id="comboCounter" aria-live="polite"></div>
-    </div>
-    <div class="stats-section">
-      <div class="score-history" id="scoreHistory"></div>
-    </div>
-  </div>
-  <div class="shuffle-notice" id="shuffleNotice">Reshuffling...</div>
-  <span class="version-tag" id="versionTag">v1.0</span>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-back" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></symbol>
+      <symbol id="i-new" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></symbol>
+      <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+    </defs>
+  </svg>
 
-  <details class="how-to-play">
-    <summary class="how-to-play-toggle">How to Play</summary>
-    <div class="how-to-play-content">
-      <div class="help-columns">
-        <div class="help-col">
-          <h3>Basics</h3>
-          <p>Swap adjacent gems to make rows or columns of 3 or more matching colors. Drag a gem onto its neighbor, or click one gem then click an adjacent gem to swap.</p>
-          <p>After a match clears, gems fall and new ones fill in from the top. If those create new matches, they chain automatically for bonus points.</p>
-        </div>
-        <div class="help-col">
-          <h3>Special Gems</h3>
-          <dl>
-            <dt>4 in a row</dt>
-            <dd>Creates a <strong>Bomb</strong> that explodes a 3&times;3 area when matched.</dd>
-            <dt>T or L of 5</dt>
-            <dd>Also creates a <strong>Bomb</strong>.</dd>
-            <dt>5 in a row</dt>
-            <dd>Creates a <strong>Line</strong> gem that clears its entire row or column.</dd>
-            <dt>6+ connected</dt>
-            <dd>Creates a <strong>Rainbow</strong> that clears all gems of a color when swapped. Any connected group of 6 counts &mdash; including two 3-matches that touch.</dd>
-          </dl>
-        </div>
-        <div class="help-col">
-          <h3>Combining Specials</h3>
-          <p>Swap two special gems together for powerful combos. Bomb+Bomb makes a bigger explosion. Line+Line clears a full cross. Rainbow+Bomb explodes every gem of that color.</p>
-          <h3>Scoring</h3>
-          <p>Each gem cleared is worth 10 points. Longer matches and special gems add bonuses. Cascading chains multiply your score.</p>
-          <p>The <strong>Avg/Move</strong> display tracks your average points per move. Use the slider to change the number of gem colors.</p>
-        </div>
+  <div class="ambient" aria-hidden="true"></div>
+
+  <main class="stage" id="stage">
+    <a href="https://ghsj.me" class="back-link"><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>ghsj.me</a>
+
+    <header class="topbar">
+      <div class="wordmark">
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+          <defs>
+            <linearGradient id="logoFill" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#a6dcef"/>
+              <stop offset="1" stop-color="#5ba3c0"/>
+            </linearGradient>
+          </defs>
+          <rect x="6" y="6" width="20" height="20" rx="6" transform="rotate(45 16 16)" fill="url(#logoFill)"/>
+          <path d="M11 13.5c2-3.5 8-3.5 10 0" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round" fill="none"/>
+        </svg>
+        <h1>Zen Match</h1>
       </div>
+      <div class="score" aria-live="polite" aria-atomic="true">
+        <span class="score-value" id="score">0</span>
+        <span class="score-label">points</span>
+      </div>
+    </header>
+
+    <div class="board" id="board" role="group" aria-label="Game board"></div>
+
+    <nav class="toolbar" aria-label="Game controls">
+      <button class="btn btn-primary" id="newGame" type="button">
+        <svg class="icon" aria-hidden="true"><use href="#i-new"/></svg>
+        <span>New Game</span>
+      </button>
+      <div class="toolbar-group">
+        <button class="icon-btn" id="helpBtn" type="button" aria-label="How to play" title="How to play">
+          <svg class="icon" aria-hidden="true"><use href="#i-help"/></svg>
+        </button>
+        <button class="icon-btn" id="settingsBtn" type="button" aria-label="Settings" title="Settings">
+          <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>
+        </button>
+      </div>
+    </nav>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <dialog class="sheet" id="settingsSheet" aria-labelledby="settingsTitle">
+    <div class="sheet-body" tabindex="-1">
+      <header class="sheet-header">
+        <h2 id="settingsTitle">Settings</h2>
+        <button class="icon-btn icon-btn-plain" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+        </button>
+      </header>
+
+      <div class="sheet-content">
+        <section class="group">
+          <h3 class="group-title">Board</h3>
+          <div class="row">
+            <span class="row-label" id="sizeLabel">Size</span>
+            <div class="seg" id="sizeSeg" role="radiogroup" aria-labelledby="sizeLabel"></div>
+          </div>
+          <div class="row">
+            <span class="row-label" id="colorsLabel">Colors</span>
+            <div class="seg" id="colorsSeg" role="radiogroup" aria-labelledby="colorsLabel"></div>
+          </div>
+          <p class="hint">Fewer colors mean longer cascades. Changes start a new game.</p>
+        </section>
+
+        <section class="group">
+          <h3 class="group-title">This game</h3>
+          <dl class="stats">
+            <div><dt>Moves</dt><dd id="statMoves">0</dd></div>
+            <div><dt>Points</dt><dd id="statPoints">0</dd></div>
+            <div><dt>Per move</dt><dd id="statAvg">0</dd></div>
+            <div><dt>Longest cascade</dt><dd id="statCombo">0</dd></div>
+          </dl>
+        </section>
+
+        <section class="group">
+          <h3 class="group-title">Palette</h3>
+          <div class="palettes" role="radiogroup" aria-label="Palette">
+            <label class="palette-card">
+              <input type="radio" name="palette" value="default">
+              <span class="palette-card-body">
+                <span class="swatches"><i class="dot d0"></i><i class="dot d1"></i><i class="dot d2"></i><i class="dot d3"></i><i class="dot d4"></i></span>
+                <span class="palette-name">Classic</span>
+                <span class="palette-desc">Soft pastels</span>
+              </span>
+            </label>
+            <label class="palette-card" data-palette="redgreen">
+              <input type="radio" name="palette" value="redgreen">
+              <span class="palette-card-body">
+                <span class="swatches"><i class="dot d0"></i><i class="dot d1"></i><i class="dot d2"></i><i class="dot d3"></i><i class="dot d4"></i></span>
+                <span class="palette-name">Color-blind friendly</span>
+                <span class="palette-desc">Safe for red-green vision</span>
+              </span>
+            </label>
+            <label class="palette-card" data-palette="highcontrast">
+              <input type="radio" name="palette" value="highcontrast">
+              <span class="palette-card-body">
+                <span class="swatches"><i class="dot d0"></i><i class="dot d1"></i><i class="dot d2"></i><i class="dot d3"></i><i class="dot d4"></i></span>
+                <span class="palette-name">High contrast</span>
+                <span class="palette-desc">Bold, saturated colors</span>
+              </span>
+            </label>
+          </div>
+          <p class="hint">Every gem also carries its own shape, so matches stay readable in any palette.</p>
+        </section>
+
+      </div>
+
+      <footer class="sheet-footer">
+        <span class="about" id="about">Zen Match</span>
+        <button class="btn" id="settingsDone" type="button">Done</button>
+      </footer>
     </div>
-  </details>
+  </dialog>
+
+  <dialog class="sheet" id="helpSheet" aria-labelledby="helpTitle">
+    <div class="sheet-body" tabindex="-1">
+      <header class="sheet-header">
+        <h2 id="helpTitle">How to play</h2>
+        <button class="icon-btn icon-btn-plain" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+        </button>
+      </header>
+
+      <div class="sheet-content help">
+        <section class="group">
+          <h3 class="group-title">The idea</h3>
+          <p>Swap two neighbouring gems to line up three or more of the same color. Drag a gem onto its neighbour, or tap one and then the other.</p>
+          <p>Cleared gems make room for new ones falling from above. When those land in matches too, the chain continues on its own. That is the whole game: make a move, then watch.</p>
+        </section>
+
+        <section class="group">
+          <h3 class="group-title">Special gems</h3>
+          <ul class="legend">
+            <li>
+              <span class="gem gem-1 sample special-bomb" aria-hidden="true"><span class="gem-shape shape-1"></span></span>
+              <span class="legend-text"><strong>Bomb</strong>Four in a row, or a T or L of five. Clears a 3&times;3 area when it goes off.</span>
+            </li>
+            <li>
+              <span class="gem gem-0 sample special-line horizontal" aria-hidden="true"><span class="gem-shape shape-0"></span></span>
+              <span class="legend-text"><strong>Line</strong>Five in a row. Clears its whole row or column.</span>
+            </li>
+            <li>
+              <span class="gem gem-2 sample special-rainbow" aria-hidden="true"><span class="gem-shape shape-2"></span></span>
+              <span class="legend-text"><strong>Rainbow</strong>Six or more connected, even two matches that touch. Swap it with any gem to clear every gem of that color.</span>
+            </li>
+          </ul>
+        </section>
+
+        <section class="group">
+          <h3 class="group-title">Combining specials</h3>
+          <p>Swap two special gems together for something bigger. Two bombs make a wider blast, two lines clear a full cross, and a rainbow with a bomb sets off every gem of that color.</p>
+        </section>
+
+        <section class="group">
+          <h3 class="group-title">Scoring</h3>
+          <p>Every gem is worth ten points. Longer matches, special gems, and each step of a cascade add more. There is no timer and no way to lose: if the board runs out of moves, it quietly reshuffles itself.</p>
+        </section>
+      </div>
+
+      <footer class="sheet-footer">
+        <button class="btn btn-primary" type="button" data-close>Got it</button>
+      </footer>
+    </div>
+  </dialog>
 
   <script type="module" src="dist/app.js"></script>
 </body>

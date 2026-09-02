@@ -1,6 +1,6 @@
 # Zen Match
 
-A mindful match-3 puzzle game designed for relaxation, not competition.
+A calm match-3. Swap gems, watch the cascades unfold, and breathe.
 
 **[Play Now](https://zen.ghsj.me)**
 
@@ -19,36 +19,40 @@ When gems cascade, your role shifts from "solver" to "witness" - watching patter
 
 Read the full [Design Philosophy](docs/zen-match-design-philosophy.md).
 
-## Features
+## Playing
 
-- **Adjustable board** (4x4 to 16x16, default 8x8) with adjustable gem types (2-10)
+- **Swap** two neighbouring gems to line up three or more of a color. Drag a gem onto its neighbour, or tap one and then the other. On a keyboard, arrow keys move between gems and Enter or Space selects.
+- **Cascades settle** rather than accelerate: each wave of a chain is a little slower than the last, so a long chain is something to watch.
 - **Special gems**, by the size and shape of the matched group:
-  - **Bomb**: a 4-match, or a T/L shape of 5 cells - 3x3 explosion
-  - **Line** (straight 5-match): Clears entire row or column
-  - **Rainbow** (any connected group of 6+): Clears all gems of one color
+  - **Bomb**: a 4-match, or a T/L shape of 5 cells - clears a 3x3 area
+  - **Line** (straight 5-match): clears its entire row or column
+  - **Rainbow** (any connected group of 6+): clears every gem of one color when swapped
 
   Groups are counted by connected cells, not run length - two 3-matches that touch
-  form a group of 6 and make a Rainbow.
-- **Chain reactions**: Special gems caught in any explosion trigger automatically
-- **Live stats**: Watch your average climb in real-time as cascades unfold
-- **No score pressure**: Just average points per move - a gentle metric
+  form a group of 6 and make a Rainbow. Swapping two specials together combines them.
+- **Chain reactions**: special gems caught in any explosion trigger automatically.
+- **No way to lose**: if the board runs out of moves it reshuffles itself.
 
-## Controls
+The score in the corner is gentle feedback, not a target. Moves, points, average per move and the longest cascade are in Settings under *This game*.
 
-- **Click/tap** two adjacent gems to swap
-- **Slider** (2-10): Adjust gem variety
-  - Fewer gems = more cascades = more zen
-  - Default is 5 (sweet spot)
-- **New Game**: Start fresh anytime (even mid-cascade)
+## Settings
 
-## Try Different Modes
+Behind the sliders icon:
+
+- **Board size** (6x6, 8x8, 10x10, 12x12) and **colors** (4 to 7). Changing either starts a new game; the button says so before it does.
+- **Palette**: Classic, Color-blind friendly, or High contrast. Every gem also carries its own shape, so matches stay readable in any palette.
+
+Settings and the current board are remembered, so closing the tab and coming back resumes the game where you left it.
+
+## URL parameters
+
+The full range is available by link, beyond what the settings sheet offers:
 
 ```
-?gems=2   Chaos mode - very long cascades
-?gems=5   Default - balanced zen (recommended)
-?gems=10  Challenge mode - rare matches
+?gems=4   Fewer colors, longer cascades (2-10, default 5)
+?gems=10  Rare matches
 ?grid=12  Bigger board (4-16, default 8)
-?seed=42  Reproducible board
+?seed=42  Reproducible board (never resumes a saved game)
 ```
 
 Cascades are bounded: refills avoid creating immediate matches, and a single move
@@ -59,16 +63,17 @@ one move can already be over a minute of animation.
 
 - TypeScript + esbuild (no framework)
 - Static assets served from `index.html` + `dist/` bundle
-- Works offline after first load
+- Installable: web manifest, app icons, `theme-color`; add it to a phone's home screen for a standalone window
+- Game state and settings persist in `localStorage`; `src/storage.ts` validates everything it reads back
 
 ## Build (TypeScript + esbuild)
-
-The game is now bundled from TypeScript with a minimal esbuild script. Output goes to `dist/`.
 
 ```bash
 npm install
 npm run build
 ```
+
+Output goes to `dist/`. The version shown in Settings comes from `package.json`.
 
 ## Local Development
 
@@ -77,8 +82,8 @@ npm run build
 npm install
 npm run dev
 
-# Serve the repo root (Python)
-python -m http.server 8080
+# Serve the repo root
+uv run python -m http.server 8080
 ```
 
 Then open http://localhost:8080
@@ -89,10 +94,13 @@ Then open http://localhost:8080
 npm run test
 ```
 
+Engine tests cover matching, specials, cascades and shuffles; storage tests cover settings parsing, URL overrides and saved-game validation.
+
 ## Documentation
 
 - [Design Philosophy](docs/zen-match-design-philosophy.md) - Core principles and zen game design
 - [Feature Pipeline](docs/zen-match-feature-pipeline.md) - Planned enhancements
+- [Project Log](docs/project-log.md) - Decisions and tech debt
 
 ## Contributing
 

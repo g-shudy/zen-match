@@ -48,3 +48,22 @@
   - WP13-partial (T22,T25): in progress (standalone)
 - Phase 5 (Visual Polish): BLOCKED on WP6+WP7
 - Phase 6 (Zen Mode): BLOCKED on WP6
+
+## 2.0 Redesign (2026-09-01)
+
+Jerry's brief: "It still looks a little bit like I wrote it ... make it look like a much more
+professional app, not just the UI but the user experience." Delivered as a single pass on
+`claude/app-polish`.
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| D11 | One experience: zen pacing only. Classic mode, hints, combo counter, score popups and board flash removed. | The toggles were developer options, not player choices. D1 already made zen the game; a mode switch made the name a question again. |
+| D12 | Score is a quiet live counter in the header; detailed stats live in Settings under *This game*. | Statistics inform, not judge (philosophy doc). A number that ticks during a cascade is feedback without arousal mechanics. |
+| D13 | Settings and help are native `<dialog>` sheets (bottom sheet on phones, centered on desktop). Board size and colors are segmented presets; palettes are swatch cards. Changing size or colors relabels Done to "Start new game". | Sliders with 13 stops and native checkboxes read as a control panel. Nothing applies silently. |
+| D14 | The game resumes after reload. Board, points, moves and longest cascade are saved after every settled move; `src/storage.ts` validates the blob against the current board shape before trusting it. | A toy you can put down and pick up is the whole point. Validation keeps a stale or hand-edited blob from breaking engine invariants. |
+| D15 | Session hue drift applies to the ambient orbs only, never the page. | The old `body` filter recoloured the gems themselves after 20 minutes and forced a full-page composite on every frame. |
+| D16 | Installable: SVG favicon, Apple touch icon, manifest, theme-color, Open Graph card, security headers in `vercel.json`. | The difference between a page and an app on a phone's home screen. |
+
+Tech debt closed: TD1 (fonts now preconnect + swap), TD3 (JS reads gem colours from CSS custom
+properties; swatch previews reuse the same variables), TD4 (landscape-phone layout moves the rail
+beside the board), I1/I2 superseded by the pointer-capture handling kept from 1.x.
