@@ -5,6 +5,7 @@ import {
   ARM,
   cloneBoard,
   type Board,
+  type Cell,
   type Frame,
   type Pos,
   type Effect,
@@ -388,6 +389,7 @@ function createGrid(): void {
   cells.length = 0;
   gems.length = 0;
   shapes.length = 0;
+  renderedKeys = [];
   updateBoardSizing();
 
   for (let r = 0; r < config.rows; r++) {
@@ -416,14 +418,35 @@ function createGrid(): void {
   }
 }
 
+// The class list each gem element last received, by index. Only elements whose
+// cell changed are touched, so a 40x40 board costs a few writes per frame.
+let renderedKeys: string[] = [];
+
+function cellKey(cell: Cell | null, r: number, c: number): string {
+  if (!cell) return 'empty';
+  const selected = gameState.selected;
+  const state = selected
+    ? selected.r === r && selected.c === c
+      ? 'selected'
+      : isAdjacent(selected, { r, c })
+        ? 'target'
+        : ''
+    : '';
+  return `${cell.type}|${cell.special ?? ''}|${cell.arms ?? ''}|${state}`;
+}
+
 function renderBoard(board: Board): void {
   gameState.currentBoard = board;
   for (let r = 0; r < config.rows; r++) {
     for (let c = 0; c < config.cols; c++) {
       const idx = posIdx(r, c);
+      const cell = board[r][c];
+      const key = cellKey(cell, r, c);
+      if (renderedKeys[idx] === key) continue;
+      renderedKeys[idx] = key;
+
       const gemEl = gems[idx];
       const shapeEl = shapes[idx];
-      const cell = board[r][c];
 
       if (!cell) {
         gemEl.className = 'gem empty';
@@ -447,11 +470,8 @@ function renderBoard(board: Board): void {
         gemEl.classList.add('special-rainbow');
       }
 
-      if (gameState.selected && gameState.selected.r === r && gameState.selected.c === c) {
-        gemEl.classList.add('selected');
-      } else if (gameState.selected && isAdjacent(gameState.selected, { r, c })) {
-        gemEl.classList.add('swap-target');
-      }
+      if (key.endsWith('|selected')) gemEl.classList.add('selected');
+      else if (key.endsWith('|target')) gemEl.classList.add('swap-target');
     }
   }
 }
@@ -753,6 +773,7 @@ async function playFrames(frames: Iterable<Frame>, token: number): Promise<void>
         const [p1, p2] = frame.positions;
         const dr = p2.r - p1.r;
         const dc = p2.c - p1.c;
+        const invalidGems: HTMLElement[] = [];
         for (const pos of frame.positions) {
           const gemEl = gems[posIdx(pos.r, pos.c)];
           if (!gemEl) continue;
@@ -760,8 +781,10 @@ async function playFrames(frames: Iterable<Frame>, token: number): Promise<void>
           gemEl.style.setProperty('--slide-x', `${(isFirst ? dc : -dc) * 12}px`);
           gemEl.style.setProperty('--slide-y', `${(isFirst ? dr : -dr) * 12}px`);
           gemEl.classList.add('invalid');
+          invalidGems.push(gemEl);
         }
         await sleep(config.timing.invalid);
+        for (const gemEl of invalidGems) gemEl.classList.remove('invalid');
         break;
       }
 
@@ -895,13 +918,17 @@ function syncUrl(): void {
   history.replaceState({}, '', url);
 }
 
-function dissolveBoard(): Promise<void> {
+async function dissolveBoard(): Promise<void> {
   gems.forEach((gemEl, i) => {
     if (gemEl.classList.contains('empty')) return;
     gemEl.style.setProperty('--d', `${(i % config.cols) * 10 + Math.random() * 90}ms`);
     gemEl.classList.add('dissolve');
   });
-  return sleep(config.timing.dissolve);
+  await sleep(config.timing.dissolve);
+  for (const gemEl of gems) {
+    gemEl.classList.remove('dissolve');
+    gemEl.style.removeProperty('--d');
+  }
 }
 
 function reformBoard(): void {
