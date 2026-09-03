@@ -86,11 +86,12 @@ export interface EngineState {
   gravity: Gravity;
 }
 
-export type RemovalAnim = 'matched' | 'exploding' | 'line-cleared' | 'rainbow-cleared';
+export type RemovalAnim = 'matched' | 'exploding' | 'line-cleared' | 'rainbow-cleared' | 'flown';
 
 export type Effect =
   | { kind: 'explosion'; r: number; c: number }
-  | { kind: 'beam'; from: Pos; dir: BeamDir };
+  | { kind: 'beam'; from: Pos; dir: BeamDir }
+  | { kind: 'flight'; from: Pos; to: Pos };
 
 export interface ScoreBreakdown {
   base: number;
@@ -230,6 +231,50 @@ export function beamCells(origin: Pos, arms: Arms, rows: number, cols: number, h
   }
 
   return { cells, effects };
+}
+
+// The four cells of the 2x2 a propeller pops, from its top-left anchor.
+export function landingCells(anchor: Pos): Pos[] {
+  return [
+    { r: anchor.r, c: anchor.c },
+    { r: anchor.r, c: anchor.c + 1 },
+    { r: anchor.r + 1, c: anchor.c },
+    { r: anchor.r + 1, c: anchor.c + 1 }
+  ];
+}
+
+// Where a propeller lands: uniformly, from the seeded generator, among anchors
+// whose block is on the board and not already being cleared; any anchor when
+// nothing is left. Boards are at least 4x4, so an anchor always exists.
+function propellerLanding(board: Board, rows: number, cols: number, toRemove: Set<string>, rng: RNG): Pos {
+  const anchors: Pos[] = [];
+  for (let r = 0; r + 1 < rows; r++) {
+    for (let c = 0; c + 1 < cols; c++) anchors.push({ r, c });
+  }
+  const free = anchors.filter(a => landingCells(a).every(p => board[p.r][p.c] && !toRemove.has(keyFor(p.r, p.c))));
+  const pool = free.length > 0 ? free : anchors;
+  return pool[rng.int(pool.length)];
+}
+
+// One propeller taking off: records the flight, claims its landing block, and
+// marks the origin as flown. Shared by chain activation and every combo.
+function launchPropeller(
+  board: Board,
+  rows: number,
+  cols: number,
+  origin: Pos,
+  toRemove: Set<string>,
+  animationClasses: Map<string, RemovalAnim>,
+  effects: Effect[],
+  rng: RNG
+): Pos {
+  const anchor = propellerLanding(board, rows, cols, toRemove, rng);
+  effects.push({ kind: 'flight', from: { r: origin.r, c: origin.c }, to: anchor });
+  claimCells(toRemove, animationClasses, landingCells(anchor), 'exploding');
+  // The gem that flew is gone from its cell whatever lands there.
+  toRemove.add(keyFor(origin.r, origin.c));
+  animationClasses.set(keyFor(origin.r, origin.c), 'flown');
+  return anchor;
 }
 
 function isSpecial(cell: Cell | null): boolean {
@@ -416,12 +461,17 @@ export class Engine {
     // - Bomb+Bomb: 5x5 explosion
     // - Beam+Beam: the union of both arm masks, fired from pos1
     // - Bomb+Beam: each arm fired three cells wide
+    // - Propeller+Propeller: both fly
+    // - Propeller+Bomb / Propeller+Beam: the propeller carries it to the landing
+    // - Rainbow+Propeller: every gem of that color takes flight
     if (bothAreSpecial) {
       const specials = [gem1Special, gem2Special];
       const isRainbowCombo = specials.includes(SPECIAL.RAINBOW);
       const isBombCombo = specials.every(s => s === SPECIAL.BOMB);
       const isLineCombo = specials.every(s => s === SPECIAL.LINE);
       const isBombLineCombo = specials.includes(SPECIAL.BOMB) && specials.includes(SPECIAL.LINE);
+      const isPropellerCombo = specials.every(s => s === SPECIAL.PROPELLER);
+      const isPropellerCarry = specials.includes(SPECIAL.PROPELLER) && (specials.includes(SPECIAL.BOMB) || specials.includes(SPECIAL.LINE));
 
       const toRemove = new Set<string>();
       const animationClasses = new Map<string, RemovalAnim>();
@@ -502,6 +552,21 @@ export class Engine {
           toRemove.add(rainbowPos);
           animationClasses.set(rainbowPos, 'rainbow-cleared');
           points = 2500 + toRemove.size * 20;
+        } else if (otherSpecial === SPECIAL.PROPELLER) {
+          // Every gem of the propeller's colour takes flight; later flights avoid
+          // blocks earlier ones already claimed.
+          const targetType = gem1IsRainbow ? gem2?.type : gem1?.type;
+          const flock: Pos[] = [];
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              if (board[r][c]?.type === targetType) flock.push({ r, c });
+            }
+          }
+          for (const origin of flock) launchPropeller(board, rows, cols, origin, toRemove, animationClasses, effects, state.rng);
+          const rainbowPos = gem1IsRainbow ? keyFor(pos2.r, pos2.c) : keyFor(pos1.r, pos1.c);
+          toRemove.add(rainbowPos);
+          animationClasses.set(rainbowPos, 'rainbow-cleared');
+          points = 2500 + toRemove.size * 20;
         } else {
           const targetType = gem1IsRainbow ? gem2?.type : gem1?.type;
           for (let r = 0; r < rows; r++) {
@@ -546,6 +611,32 @@ export class Engine {
         claimCells(toRemove, animationClasses, beam.cells, 'line-cleared');
         effects.push(...beam.effects);
         points = 1200 + toRemove.size * 15;
+      } else if (isPropellerCombo) {
+        for (const origin of [pos1, pos2]) launchPropeller(board, rows, cols, origin, toRemove, animationClasses, effects, state.rng);
+        points = 900 + toRemove.size * 12;
+      } else if (isPropellerCarry) {
+        // The propeller carries the other special to its landing and fires it there.
+        // After the swap the propeller sits where the other gem started.
+        const propellerPos = gem1Special === SPECIAL.PROPELLER ? { r: pos2.r, c: pos2.c } : { r: pos1.r, c: pos1.c };
+        const carried = gem1Special === SPECIAL.PROPELLER ? gem2 : gem1;
+        const anchor = launchPropeller(board, rows, cols, propellerPos, toRemove, animationClasses, effects, state.rng);
+        if (carried?.special === SPECIAL.BOMB) {
+          effects.push({ kind: 'explosion', r: anchor.r, c: anchor.c });
+          const blast: Pos[] = [];
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              const nr = anchor.r + dr;
+              const nc = anchor.c + dc;
+              if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) blast.push({ r: nr, c: nc });
+            }
+          }
+          claimCells(toRemove, animationClasses, blast, 'exploding');
+        } else {
+          const beam = beamCells(anchor, armsOf(carried), rows, cols);
+          claimCells(toRemove, animationClasses, beam.cells, 'line-cleared');
+          effects.push(...beam.effects);
+        }
+        points = 1100 + toRemove.size * 15;
       }
 
       // The two swapped specials are consumed BY the combo above; without seeding
@@ -558,6 +649,7 @@ export class Engine {
         rows,
         cols,
         effects,
+        state.rng,
         new Set([keyFor(pos1.r, pos1.c), keyFor(pos2.r, pos2.c)])
       );
       chainReactionCount += chainCount;
@@ -619,6 +711,7 @@ export class Engine {
         rows,
         cols,
         effects,
+        state.rng,
         processed
       );
 
@@ -698,6 +791,8 @@ function claimCells(toRemove: Set<string>, animationClasses: Map<string, Removal
   for (const pos of cells) {
     const k = keyFor(pos.r, pos.c);
     toRemove.add(k);
+    // A gem that flew away is gone whatever lands on its cell afterwards.
+    if (animationClasses.get(k) === 'flown') continue;
     animationClasses.set(k, anim);
   }
 }
@@ -773,6 +868,10 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
       if (!cell) continue;
       const type = cell.type;
       if (board[r][c + 1]?.type !== type || board[r + 1][c]?.type !== type || board[r + 1][c + 1]?.type !== type) continue;
+      // A cell in two overlapping squares keeps the first anchor, and a group with
+      // two squares keeps whichever of them its BFS reaches first. Neither choice is
+      // observable: such a group spans six or more cells, so the ladder gives it a
+      // rainbow and never asks for the anchor.
       for (const [i, j] of [[r, c], [r, c + 1], [r + 1, c], [r + 1, c + 1]]) {
         const key = keyFor(i, j);
         const existing = matchedCells.get(key);
@@ -832,6 +931,10 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
       }
     }
 
+    // `direction` reads 'vertical' for a pure-square group: every cell of one
+    // carries direction 'square', so neither hDir nor vDir is ever set. Nothing
+    // reads `direction` on that path — the ladder tests `square` first, and only
+    // the straight-five branch below it asks which way a group runs.
     // Phase 3A: Always use actual group cell count for effectiveLen
     matches.push({
       positions: match,
@@ -853,6 +956,7 @@ function activateSpecialsInRemovalSet(
   rows: number,
   cols: number,
   effects: Effect[],
+  rng: RNG,
   processed = new Set<string>()
 ): { bonusPoints: number; chainCount: number; subSteps: RemovalSubStep[] } {
   let bonusPoints = 0;
@@ -939,6 +1043,19 @@ function activateSpecialsInRemovalSet(
 
         animationClasses.set(key, 'rainbow-cleared');
         bonusPoints += 500;
+      } else if (gem.special === SPECIAL.PROPELLER) {
+        chainCount++;
+        const before = new Set(toRemove);
+        const anchor = launchPropeller(board, rows, cols, { r, c }, toRemove, animationClasses, stepEffects, rng);
+        effects.push(...stepEffects.filter(e => e.kind === 'flight'));
+        for (const pos of landingCells(anchor)) {
+          const newKey = keyFor(pos.r, pos.c);
+          if (before.has(newKey)) continue;
+          stepPositions.push(pos);
+          stepAnimations[newKey] = 'exploding';
+          newSpecialsFound = true;
+        }
+        bonusPoints += 150;
       }
 
       if (stepPositions.length > 0) {
@@ -1063,7 +1180,8 @@ function* cascadeWaves(state: EngineState, tally: Tally): Generator<Frame, void,
       animationClasses,
       rows,
       cols,
-      effects
+      effects,
+      state.rng
     );
 
     matchBonus += bonusPoints;

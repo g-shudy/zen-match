@@ -615,7 +615,7 @@ function showEffects(effects: Effect[]): void {
   const beams: BeamEffect[] = [];
   for (const effect of effects) {
     if (effect.kind === 'explosion') showExplosionEffect(effect.r, effect.c);
-    else beams.push(effect);
+    else if (effect.kind === 'beam') beams.push(effect);
   }
   if (beams.length === 0) return;
 

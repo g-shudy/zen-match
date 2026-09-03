@@ -501,8 +501,24 @@ Expected: the six new tests fail (`landingCells` not exported, no flights, wrong
 
 In `src/engine/index.ts`:
 
-1. `RemovalAnim` gains `'flown'`; `Effect` gains `| { kind: 'flight'; from: Pos; to: Pos }` (to is the landing anchor).
-2. Add after `beamCells`:
+1. `claimCells` gains one guard, so a cell a gem flew out of keeps reading `'flown'`
+   whatever lands on it later. Without it the marker is lost whenever a second
+   propeller's landing, a blast or a beam sweeps a cell an earlier flight left:
+
+```ts
+function claimCells(toRemove: Set<string>, animationClasses: Map<string, RemovalAnim>, cells: Pos[], anim: RemovalAnim): void {
+  for (const pos of cells) {
+    const k = keyFor(pos.r, pos.c);
+    toRemove.add(k);
+    // A gem that flew away is gone whatever lands on its cell afterwards.
+    if (animationClasses.get(k) === 'flown') continue;
+    animationClasses.set(k, anim);
+  }
+}
+```
+
+2. `RemovalAnim` gains `'flown'`; `Effect` gains `| { kind: 'flight'; from: Pos; to: Pos }` (to is the landing anchor).
+3. Add after `beamCells`:
 
 ```ts
 // The four cells of the 2x2 a propeller pops, from its top-left anchor.
@@ -550,7 +566,7 @@ function launchPropeller(
 }
 ```
 
-3. `activateSpecialsInRemovalSet` gains a `rng: RNG` parameter before `processed`; update its three call sites to pass `state.rng` (in `cascadeWaves` and both call sites in `resolveMove`, where the variable is `state`). Add the branch after the rainbow branch:
+4. `activateSpecialsInRemovalSet` gains a `rng: RNG` parameter before `processed`; update its three call sites to pass `state.rng` (in `cascadeWaves` and both call sites in `resolveMove`, where the variable is `state`). Add the branch after the rainbow branch:
 
 ```ts
       } else if (gem.special === SPECIAL.PROPELLER) {
@@ -570,6 +586,15 @@ function launchPropeller(
 ```
 
    (The flight effect must reach both `stepEffects`, which the page plays with the sub-step, and `effects`; `launchPropeller` pushes into the array it is given, so pass `stepEffects` and copy the flight into `effects`.)
+
+5. The new `Effect` variant breaks `showEffects` in `src/main.ts`, whose `else` branch
+   then admits a `flight`, which carries no `dir`. Narrow it so the typecheck passes;
+   Task 3 gives flights their own handler here.
+
+```ts
+    if (effect.kind === 'explosion') showExplosionEffect(effect.r, effect.c);
+    else if (effect.kind === 'beam') beams.push(effect);
+```
 
 - [ ] **Step 4: Combos**
 

@@ -9,6 +9,7 @@ import {
   ARMS_VERTICAL,
   ARMS_ALL,
   beamCells,
+  landingCells,
   hasValidMoves,
   findValidMove,
   findMatches,
@@ -935,4 +936,132 @@ test('The refill guard never completes a square with the three cells already pla
     fillGems(board, 3, 3, 2, new RNG(seed), 'down');
     assert.equal(board[1][1].type, 1, `seed ${seed}: the guard must refuse the square`);
   }
+});
+
+// --- Propeller ----------------------------------------------------------------
+
+function flightsOf(frame) {
+  return frame.effects.filter(e => e.kind === 'flight');
+}
+
+test('A matched propeller flies to a landing outside the clearing and pops a 2x2 there', () => {
+  // Propeller at (1,1); swapping (2,0) and (2,1) completes column 1 rows 0-2.
+  const board = cyclicBoard();
+  board[0][1] = makeCell(0);
+  board[1][1] = makeCell(0, SPECIAL.PROPELLER);
+  board[2][0] = makeCell(0);
+  assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
+
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  engine.setBoard(board);
+  const frame = removeFrame(play(engine, { r: 2, c: 0 }, { r: 2, c: 1 }));
+
+  const flights = flightsOf(frame);
+  assert.equal(flights.length, 1);
+  assert.deepEqual(flights[0].from, { r: 1, c: 1 });
+  const landing = landingCells(flights[0].to);
+  assert.ok(flights[0].to.r >= 0 && flights[0].to.r <= 3 && flights[0].to.c >= 0 && flights[0].to.c <= 3, 'anchor keeps the block on a 5x5');
+  const removed = new Set(keys(frame.positions));
+  for (const pos of landing) assert.ok(removed.has(`${pos.r},${pos.c}`), 'every landing cell is cleared');
+  for (const pos of landing) assert.ok(!['0,1', '1,1', '2,1'].includes(`${pos.r},${pos.c}`), 'the landing avoids the cells already being cleared');
+  assert.equal(frame.animations['1,1'], 'flown');
+  assert.equal(frame.positions.length, 3 + 4);
+  assert.equal(frame.subSteps.length, 1);
+  assert.deepEqual(frame.subSteps[0].triggerPos, { r: 1, c: 1 });
+});
+
+test('Propeller + bomb carries the bomb to the landing', () => {
+  const board = cyclicBoard();
+  board[2][2] = makeCell(2, SPECIAL.PROPELLER);
+  board[2][3] = makeCell(3, SPECIAL.BOMB);
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  engine.setBoard(board);
+  const frame = removeFrame(play(engine, { r: 2, c: 2 }, { r: 2, c: 3 }));
+
+  const flights = flightsOf(frame);
+  assert.equal(flights.length, 1);
+  assert.deepEqual(flights[0].from, { r: 2, c: 3 }, 'after the swap the propeller sits where the bomb started');
+  const anchor = flights[0].to;
+  const explosions = frame.effects.filter(e => e.kind === 'explosion');
+  assert.deepEqual(explosions, [{ kind: 'explosion', r: anchor.r, c: anchor.c }], 'the bomb fires centred on the anchor');
+  const removed = new Set(keys(frame.positions));
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const r = anchor.r + dr;
+      const c = anchor.c + dc;
+      if (r >= 0 && r < 5 && c >= 0 && c < 5) assert.ok(removed.has(`${r},${c}`), `blast covers ${r},${c}`);
+    }
+  }
+  for (const pos of landingCells(anchor)) assert.ok(removed.has(`${pos.r},${pos.c}`));
+  assert.ok(removed.has('2,2') && removed.has('2,3'), 'both swapped specials are consumed');
+  assert.equal(frame.score.points, 1100 + frame.positions.length * 15);
+});
+
+test('Propeller + beam fires the arms from the landing anchor', () => {
+  const board = cyclicBoard();
+  board[2][2] = makeCell(2, SPECIAL.LINE, ARMS_HORIZONTAL);
+  board[2][3] = makeCell(3, SPECIAL.PROPELLER);
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  engine.setBoard(board);
+  const frame = removeFrame(play(engine, { r: 2, c: 2 }, { r: 2, c: 3 }));
+
+  const flights = flightsOf(frame);
+  assert.equal(flights.length, 1);
+  assert.deepEqual(flights[0].from, { r: 2, c: 2 });
+  const anchor = flights[0].to;
+  const removed = new Set(keys(frame.positions));
+  for (let c = 0; c < 5; c++) assert.ok(removed.has(`${anchor.r},${c}`), `the beam clears row ${anchor.r}`);
+  const beams = frame.effects.filter(e => e.kind === 'beam');
+  assert.ok(beams.every(b => b.from.r === anchor.r && b.from.c === anchor.c), 'beams fire from the anchor');
+  assert.equal(frame.score.points, 1100 + frame.positions.length * 15);
+});
+
+test('Two propellers both fly', () => {
+  const board = cyclicBoard();
+  board[2][2] = makeCell(2, SPECIAL.PROPELLER);
+  board[2][3] = makeCell(3, SPECIAL.PROPELLER);
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  engine.setBoard(board);
+  const frame = removeFrame(play(engine, { r: 2, c: 2 }, { r: 2, c: 3 }));
+
+  const flights = flightsOf(frame);
+  assert.equal(flights.length, 2);
+  assert.deepEqual(keys(flights.map(f => f.from)), ['2,2', '2,3']);
+  assert.equal(frame.score.points, 900 + frame.positions.length * 12);
+});
+
+test('Rainbow + propeller sends every gem of that colour flying, and landings fall back when the board is claimed', () => {
+  // Two colours on a 4x4 checkerboard: eight gems of colour 1 fly; there are only
+  // nine anchors, so most flights must fall back to an already-claimed anchor.
+  const board = Array.from({ length: 4 }, (_, r) => Array.from({ length: 4 }, (_, c) => makeCell((r + c) % 2)));
+  board[1][1] = makeCell(0, SPECIAL.RAINBOW); // keeps the checkerboard colour at (1,1)
+  board[1][2] = makeCell(1, SPECIAL.PROPELLER); // colour 1, as the checkerboard has there
+  assert.equal(findMatches(board, 4, 4).length, 0, 'fixture must start match-free');
+  const engine = new Engine({ rows: 4, cols: 4, gemTypes: 2, seed: 8 });
+  engine.setBoard(board);
+  const frame = removeFrame(play(engine, { r: 1, c: 1 }, { r: 1, c: 2 }));
+
+  const flights = flightsOf(frame);
+  assert.equal(flights.length, 8, 'every colour-1 gem on the swapped board, the propeller included');
+  const removed = new Set(keys(frame.positions));
+  for (const f of flights) {
+    assert.ok(f.to.r >= 0 && f.to.r <= 2 && f.to.c >= 0 && f.to.c <= 2, 'every anchor keeps its block on the board');
+    assert.equal(frame.animations[`${f.from.r},${f.from.c}`], 'flown');
+    assert.ok(removed.has(`${f.from.r},${f.from.c}`), 'the gem that flew is gone from its cell');
+    for (const pos of landingCells(f.to)) assert.ok(removed.has(`${pos.r},${pos.c}`), 'every landing cell is cleared');
+  }
+  assert.ok(removed.has('1,2'), 'the rainbow is consumed');
+  assert.equal(frame.score.points, 2500 + frame.positions.length * 20);
+});
+
+test('Landings are deterministic under a seed', () => {
+  const make = () => {
+    const board = cyclicBoard();
+    board[2][2] = makeCell(2, SPECIAL.PROPELLER);
+    board[2][3] = makeCell(3, SPECIAL.PROPELLER);
+    const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 21 });
+    engine.setBoard(board);
+    return play(engine, { r: 2, c: 2 }, { r: 2, c: 3 });
+  };
+  assert.equal(JSON.stringify(make().frames), JSON.stringify(make().frames));
 });
