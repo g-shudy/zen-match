@@ -132,7 +132,6 @@ const MAX_CASCADE_DEPTH = 50;
 interface MatchGroup {
   positions: Pos[];
   effectiveLen: number;
-  isComplex: boolean;
   direction: 'horizontal' | 'vertical' | 'both';
   type: number;
   intersection: Pos | null; // the cell shared by a horizontal and a vertical run, when there is one
@@ -747,7 +746,6 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
 
     const match: Pos[] = [];
     const queue = [key];
-    let hasComplex = false;
     let intersection: Pos | null = null;
     let hDir = false;
     let vDir = false;
@@ -761,9 +759,8 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
       if (!cellData) continue;
 
       match.push({ r: cellData.r, c: cellData.c });
-      if (cellData.isComplex) {
-        hasComplex = true;
-        if (!intersection) intersection = { r: cellData.r, c: cellData.c };
+      if (cellData.isComplex && !intersection) {
+        intersection = { r: cellData.r, c: cellData.c };
       }
       if (cellData.direction === 'horizontal') hDir = true;
       if (cellData.direction === 'vertical') vDir = true;
@@ -788,7 +785,6 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
     matches.push({
       positions: match,
       effectiveLen: match.length,
-      isComplex: hasComplex,
       direction: hDir && vDir ? 'both' : (hDir ? 'horizontal' : 'vertical'),
       type: data.type,
       intersection

@@ -12,11 +12,17 @@ const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 function legendEntries() {
   const entries = [];
-  const re = /<span class="gem ([^"]*)"[^>]*aria-hidden="true">[\s\S]*?<strong>([^<]+)<\/strong>/g;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    const classes = m[1].split(/\s+/).filter(Boolean);
-    if (classes.includes('sample')) entries.push({ name: m[2], classes });
+  const liRe = /<li>([\s\S]*?)<\/li>/g;
+  const spanRe = /<span class="gem ([^"]*)"[^>]*aria-hidden="true">/;
+  const strongRe = /<strong>([^<]+)<\/strong>/;
+  let li;
+  while ((li = liRe.exec(html)) !== null) {
+    const block = li[1];
+    const spanMatch = spanRe.exec(block);
+    const strongMatch = strongRe.exec(block);
+    if (!spanMatch || !strongMatch) continue;
+    const classes = spanMatch[1].split(/\s+/).filter(Boolean);
+    if (classes.includes('sample')) entries.push({ name: strongMatch[1], classes });
   }
   return entries;
 }
