@@ -425,39 +425,90 @@ function showExplosionEffect(r: number, c: number): void {
   setTimeout(() => effect.remove(), 500);
 }
 
-// A beam runs from the firing gem's cell to the board edge and is swept outward by CSS.
-function showBeamEffect(effect: Effect): void {
-  if (effect.kind !== 'beam') return;
-  const center = cellCenter(effect.from.r, effect.from.c);
-  if (!center) return;
+type BeamEffect = Extract<Effect, { kind: 'beam' }>;
+
+// A beam's swept rectangle always starts at the board edge in its direction of
+// travel, so two beams that share a direction and a row (left/right) or column
+// (up/down) nest: the shorter one's pixels are a subset of the longer one's.
+// "Reach" is a signed distance such that the longer beam always has the larger
+// reach, whichever direction it fires, so the caller can keep the max per group.
+function beamReach(beam: BeamEffect): number {
+  switch (beam.dir) {
+    case 'up': return beam.from.r;
+    case 'down': return -beam.from.r;
+    case 'left': return beam.from.c;
+    case 'right': return -beam.from.c;
+  }
+}
+
+function beamGroupKey(beam: BeamEffect): string {
+  const axis = beam.dir === 'up' || beam.dir === 'down' ? beam.from.c : beam.from.r;
+  return `${beam.dir}:${axis}`;
+}
+
+// Drop beams whose pixels are entirely covered by a longer beam in the same
+// direction and row/column, so a rainbow crossing a Cross fires one beam per
+// direction instead of one per gem it touched.
+function pruneNestedBeams(beams: BeamEffect[]): BeamEffect[] {
+  const kept = new Map<string, BeamEffect>();
+  for (const beam of beams) {
+    const key = beamGroupKey(beam);
+    const existing = kept.get(key);
+    if (!existing || beamReach(beam) > beamReach(existing)) kept.set(key, beam);
+  }
+  return [...kept.values()];
+}
+
+// Builds every surviving beam's element against one shared boardRect and cell
+// size, with no DOM write between reads, so a large fan-out forces one layout
+// instead of one per beam.
+function buildBeamElements(beams: BeamEffect[]): HTMLDivElement[] {
+  const elements: HTMLDivElement[] = [];
   const boardRect = boardEl.getBoundingClientRect();
   const cellSize = parseFloat(getComputedStyle(boardEl).getPropertyValue('--cell-size')) || 48;
   const half = cellSize / 2;
-  const el = document.createElement('div');
-  el.className = `beam-effect ${effect.dir}`;
-  switch (effect.dir) {
-    case 'up':
-      el.style.cssText = `left:${center.x - half}px;top:0;width:${cellSize}px;height:${center.y}px;`;
-      break;
-    case 'down':
-      el.style.cssText = `left:${center.x - half}px;top:${center.y}px;width:${cellSize}px;height:${boardRect.height - center.y}px;`;
-      break;
-    case 'left':
-      el.style.cssText = `left:0;top:${center.y - half}px;width:${center.x}px;height:${cellSize}px;`;
-      break;
-    case 'right':
-      el.style.cssText = `left:${center.x}px;top:${center.y - half}px;width:${boardRect.width - center.x}px;height:${cellSize}px;`;
-      break;
+  for (const beam of pruneNestedBeams(beams)) {
+    const center = cellCenter(beam.from.r, beam.from.c);
+    if (!center) continue;
+    const el = document.createElement('div');
+    el.className = `beam-effect ${beam.dir}`;
+    switch (beam.dir) {
+      case 'up':
+        el.style.cssText = `left:${center.x - half}px;top:0;width:${cellSize}px;height:${center.y}px;`;
+        break;
+      case 'down':
+        el.style.cssText = `left:${center.x - half}px;top:${center.y}px;width:${cellSize}px;height:${boardRect.height - center.y}px;`;
+        break;
+      case 'left':
+        el.style.cssText = `left:0;top:${center.y - half}px;width:${center.x}px;height:${cellSize}px;`;
+        break;
+      case 'right':
+        el.style.cssText = `left:${center.x}px;top:${center.y - half}px;width:${boardRect.width - center.x}px;height:${cellSize}px;`;
+        break;
+    }
+    elements.push(el);
   }
-  boardEl.appendChild(el);
-  setTimeout(() => el.remove(), 450);
+  return elements;
 }
 
+// Explosions keep their own read-then-write path per effect; only beams fan out
+// enough (a rainbow x Cross can fire a couple hundred) to need batching.
 function showEffects(effects: Effect[]): void {
+  const beams: BeamEffect[] = [];
   for (const effect of effects) {
     if (effect.kind === 'explosion') showExplosionEffect(effect.r, effect.c);
-    else showBeamEffect(effect);
+    else beams.push(effect);
   }
+  if (beams.length === 0) return;
+
+  const elements = buildBeamElements(beams);
+  if (elements.length === 0) return;
+  const fragment = document.createDocumentFragment();
+  for (const el of elements) fragment.appendChild(el);
+  boardEl.appendChild(fragment);
+  setTimeout(() => {
+    for (const el of elements) el.remove();
+  }, 450);
 }
 
 let activeParticles = 0;

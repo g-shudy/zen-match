@@ -671,6 +671,7 @@ button {
   content: '';
   position: absolute;
   inset: 0;
+  z-index: 2;
   --bar: rgba(255, 255, 255, 0.92);
   --arm-up: transparent;
   --arm-right: transparent;
@@ -682,7 +683,10 @@ button {
     linear-gradient(var(--arm-right), var(--arm-right)) 100% 50% / 50% 4px no-repeat,
     linear-gradient(var(--arm-down), var(--arm-down)) 50% 100% / 4px 50% no-repeat,
     linear-gradient(var(--arm-left), var(--arm-left)) 0 50% / 50% 4px no-repeat;
-  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.8));
+  /* Dark halo under the white one so arms stay visible on near-white gem colours
+     (redgreen #3, highcontrast #2). lineGlow only pulses opacity, so this stays static
+     and isn't repainted every frame. */
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 5px rgba(255, 255, 255, 0.8));
   animation: lineGlow 1s ease-in-out infinite;
 }
 
@@ -692,8 +696,8 @@ button {
 .gem.arm-left::after { --arm-left: var(--bar); }
 
 @keyframes lineGlow {
-  0%, 100% { opacity: 0.9; filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.8)); }
-  50% { opacity: 1; filter: drop-shadow(0 0 9px rgba(255, 255, 255, 1)); }
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
 }
 
 .gem.special-rainbow {
@@ -787,6 +791,13 @@ button {
   0% { transform: scaleY(0); opacity: 1; }
   40% { transform: scaleY(1); opacity: 1; }
   100% { transform: scaleY(1); opacity: 0; }
+}
+
+/* Opacity-only fallback for .beam-effect under prefers-reduced-motion; see the
+   reduced-motion block, which overrides the scale sweep above with this. */
+@keyframes beamFade {
+  from { opacity: 0.8; }
+  to { opacity: 0; }
 }
 
 /* 8. New-game transition -------------------------------------------------- */
@@ -1283,6 +1294,16 @@ button {
   .gem.special-line::after,
   .gem.special-rainbow::before {
     animation: none;
+  }
+
+  /* .beam-effect.up/.down/.left/.right set animation-name at the same specificity
+     as .beam-effect, so this needs the same selector list to win over them. */
+  .beam-effect,
+  .beam-effect.up,
+  .beam-effect.down,
+  .beam-effect.left,
+  .beam-effect.right {
+    animation-name: beamFade;
   }
 
   .particle {
