@@ -501,23 +501,47 @@ Expected: the six new tests fail (`landingCells` not exported, no flights, wrong
 
 In `src/engine/index.ts`:
 
-1. `claimCells` gains one guard, so a cell a gem flew out of keeps reading `'flown'`
+1. Extract the per-cell body of `claimCells` into `markForRemoval`, the single place
+   `'flown'` is kept sticky, so a cell a gem flew out of keeps reading `'flown'`
    whatever lands on it later. Without it the marker is lost whenever a second
    propeller's landing, a blast or a beam sweeps a cell an earlier flight left:
 
 ```ts
+// One cell joining the removal set, and the single place `'flown'` is kept sticky:
+// a gem that flew away is gone whatever lands on its cell afterwards, so a later
+// landing, blast or beam claims the cell without restyling it. Every path that
+// writes an animation class for a cell it is removing goes through here.
+function markForRemoval(toRemove: Set<string>, animationClasses: Map<string, RemovalAnim>, key: string, anim: RemovalAnim): void {
+  toRemove.add(key);
+  if (animationClasses.get(key) === 'flown') return;
+  animationClasses.set(key, anim);
+}
+
 function claimCells(toRemove: Set<string>, animationClasses: Map<string, RemovalAnim>, cells: Pos[], anim: RemovalAnim): void {
-  for (const pos of cells) {
-    const k = keyFor(pos.r, pos.c);
-    toRemove.add(k);
-    // A gem that flew away is gone whatever lands on its cell afterwards.
-    if (animationClasses.get(k) === 'flown') continue;
-    animationClasses.set(k, anim);
-  }
+  for (const pos of cells) markForRemoval(toRemove, animationClasses, keyFor(pos.r, pos.c), anim);
 }
 ```
 
-2. `RemovalAnim` gains `'flown'`; `Effect` gains `| { kind: 'flight'; from: Pos; to: Pos }` (to is the landing anchor).
+   `activateSpecialsInRemovalSet` never calls `claimCells`, so its bomb, line and
+   rainbow branches each bypassed the guard when they set the trigger's own cell.
+   Route those three writes through the helper as well:
+   `markForRemoval(toRemove, animationClasses, key, 'exploding' | 'line-cleared' | 'rainbow-cleared')`
+   in place of `animationClasses.set(key, ...)`. `toRemove.add` is a no-op there,
+   since the key came out of the removal set.
+
+2. `RemovalAnim` gains `'flown'`. `Effect` gains a named flight member, so the helper
+   that records one can hand it back:
+
+```ts
+// A gem leaving `from` for the 2x2 anchored at `to`. Named so the helper that
+// records one can hand it back to callers that need the anchor.
+export type FlightEffect = { kind: 'flight'; from: Pos; to: Pos };
+
+export type Effect =
+  | { kind: 'explosion'; r: number; c: number }
+  | { kind: 'beam'; from: Pos; dir: BeamDir }
+  | FlightEffect;
+```
 3. Add after `beamCells`:
 
 ```ts
@@ -545,7 +569,9 @@ function propellerLanding(board: Board, rows: number, cols: number, toRemove: Se
 }
 
 // One propeller taking off: records the flight, claims its landing block, and
-// marks the origin as flown. Shared by chain activation and every combo.
+// marks the origin as flown. Shared by chain activation and every combo. Returns
+// the flight it pushed, so a caller wanting the anchor reads `.to` and a caller
+// wanting the effect in a second array pushes the same object.
 function launchPropeller(
   board: Board,
   rows: number,
@@ -555,14 +581,15 @@ function launchPropeller(
   animationClasses: Map<string, RemovalAnim>,
   effects: Effect[],
   rng: RNG
-): Pos {
+): FlightEffect {
   const anchor = propellerLanding(board, rows, cols, toRemove, rng);
-  effects.push({ kind: 'flight', from: { r: origin.r, c: origin.c }, to: anchor });
+  const flight: FlightEffect = { kind: 'flight', from: { r: origin.r, c: origin.c }, to: anchor };
+  effects.push(flight);
   claimCells(toRemove, animationClasses, landingCells(anchor), 'exploding');
   // The gem that flew is gone from its cell whatever lands there.
   toRemove.add(keyFor(origin.r, origin.c));
   animationClasses.set(keyFor(origin.r, origin.c), 'flown');
-  return anchor;
+  return flight;
 }
 ```
 
@@ -572,9 +599,11 @@ function launchPropeller(
       } else if (gem.special === SPECIAL.PROPELLER) {
         chainCount++;
         const before = new Set(toRemove);
-        const anchor = launchPropeller(board, rows, cols, { r, c }, toRemove, animationClasses, stepEffects, rng);
-        effects.push(...stepEffects.filter(e => e.kind === 'flight'));
-        for (const pos of landingCells(anchor)) {
+        const flight = launchPropeller(board, rows, cols, { r, c }, toRemove, animationClasses, stepEffects, rng);
+        // One object in both arrays: the page plays it with the sub-step and splits
+        // the frame's effects by identity.
+        effects.push(flight);
+        for (const pos of landingCells(flight.to)) {
           const newKey = keyFor(pos.r, pos.c);
           if (before.has(newKey)) continue;
           stepPositions.push(pos);
@@ -585,7 +614,7 @@ function launchPropeller(
       }
 ```
 
-   (The flight effect must reach both `stepEffects`, which the page plays with the sub-step, and `effects`; `launchPropeller` pushes into the array it is given, so pass `stepEffects` and copy the flight into `effects`.)
+   (The flight effect must reach both `stepEffects`, which the page plays with the sub-step, and `effects`; `launchPropeller` pushes into the array it is given, so pass `stepEffects` and push the returned object into `effects`. It must be the same object in both, because Task 3's page splits the frame's effects by identity.)
 
 5. The new `Effect` variant breaks `showEffects` in `src/main.ts`, whose `else` branch
    then admits a `flight`, which carries no `dir`. Narrow it so the typecheck passes;
@@ -605,38 +634,84 @@ In `resolveMove`, extend the flags:
       const isPropellerCarry = specials.includes(SPECIAL.PROPELLER) && (specials.includes(SPECIAL.BOMB) || specials.includes(SPECIAL.LINE));
 ```
 
+The set of cells the combo has already consumed has to outlive the branch that
+fills it, so hoist it beside `toRemove` (the call site at the end of the block then
+passes `processed` instead of building a set inline):
+
+```ts
+      // Seeded with the same two: they are consumed BY the combo below, and without
+      // this they detonate a second time on top of it, inflating both the cleared
+      // area and the score. A combo that launches other gems adds those here too, so
+      // a gem consumed by its own flight never fires again.
+      const processed = new Set([keyFor(pos1.r, pos1.c), keyFor(pos2.r, pos2.c)]);
+```
+
+Compute the rainbow's own cell once, at the top of the rainbow combo, and consume it
+once below the branch chain rather than repeating the three lines in each branch.
+The hoist moves no number: `toRemove` already holds both swapped cells, so the
+`toRemove.add` was never changing the size that each `points` reads.
+
+```ts
+        const otherSpecial = gem1IsRainbow ? gem2Special : gem1Special;
+        // After the swap the rainbow sits where the other gem started.
+        const rainbowPos = gem1IsRainbow ? keyFor(pos2.r, pos2.c) : keyFor(pos1.r, pos1.c);
+```
+
+```ts
+        }
+
+        // Every branch consumes the rainbow itself. `toRemove` already holds both
+        // swapped cells, so this only fixes the class; the size each `points` above
+        // read is unchanged.
+        toRemove.add(rainbowPos);
+        animationClasses.set(rainbowPos, 'rainbow-cleared');
+      } else if (isBombCombo) {
+```
+
 Inside the rainbow combo, add before its final `else`:
 
 ```ts
         } else if (otherSpecial === SPECIAL.PROPELLER) {
           // Every gem of the propeller's colour takes flight; later flights avoid
-          // blocks earlier ones already claimed.
+          // blocks earlier ones already claimed. The rainbow carries a colour of its
+          // own, so it is skipped here and consumed as a rainbow below.
           const targetType = gem1IsRainbow ? gem2?.type : gem1?.type;
           const flock: Pos[] = [];
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
-              if (board[r][c]?.type === targetType) flock.push({ r, c });
+              if (keyFor(r, c) !== rainbowPos && board[r][c]?.type === targetType) flock.push({ r, c });
             }
           }
-          for (const origin of flock) launchPropeller(board, rows, cols, origin, toRemove, animationClasses, effects, state.rng);
-          const rainbowPos = gem1IsRainbow ? keyFor(pos2.r, pos2.c) : keyFor(pos1.r, pos1.c);
-          toRemove.add(rainbowPos);
-          animationClasses.set(rainbowPos, 'rainbow-cleared');
+          for (const origin of flock) {
+            launchPropeller(board, rows, cols, origin, toRemove, animationClasses, effects, state.rng);
+            // A flight each, and nothing more: a gem the flock consumed never fires
+            // again, whatever special it was carrying.
+            processed.add(keyFor(origin.r, origin.c));
+          }
           points = 2500 + toRemove.size * 20;
 ```
+
+The two skips are what keeps the flock honest. Without the `rainbowPos` guard a
+rainbow that happens to share the propeller's colour launches itself out of the
+cell the page is rendering as a rainbow clear; without `processed.add` a second
+propeller of that colour flies with the flock and again in the chain loop, and a
+bomb or beam gem of that colour flies and then fires where it used to stand.
 
 After the `isBombLineCombo` branch add:
 
 ```ts
       } else if (isPropellerCombo) {
         for (const origin of [pos1, pos2]) launchPropeller(board, rows, cols, origin, toRemove, animationClasses, effects, state.rng);
+        // As in every combo above, `toRemove.size` is the count before any chaining:
+        // specials the landings claim add their cells afterwards and are paid for by
+        // the chain bonus, not by this formula. Same for the carry below.
         points = 900 + toRemove.size * 12;
       } else if (isPropellerCarry) {
         // The propeller carries the other special to its landing and fires it there.
         // After the swap the propeller sits where the other gem started.
         const propellerPos = gem1Special === SPECIAL.PROPELLER ? { r: pos2.r, c: pos2.c } : { r: pos1.r, c: pos1.c };
         const carried = gem1Special === SPECIAL.PROPELLER ? gem2 : gem1;
-        const anchor = launchPropeller(board, rows, cols, propellerPos, toRemove, animationClasses, effects, state.rng);
+        const anchor = launchPropeller(board, rows, cols, propellerPos, toRemove, animationClasses, effects, state.rng).to;
         if (carried?.special === SPECIAL.BOMB) {
           effects.push({ kind: 'explosion', r: anchor.r, c: anchor.c });
           const blast: Pos[] = [];
@@ -668,7 +743,12 @@ Add to the design comment above `if (bothAreSpecial)`:
 - [ ] **Step 5: Run the tests, the typecheck and the suite**
 
 Run: `node build.mjs --test && node --test tests/engine.test.js && npm run typecheck && npm test`
-Expected: 57 engine tests; typecheck clean; 85 total.
+Expected: 62 engine tests; typecheck clean; 90 total. Beyond the brief's six, the
+suite covers a propeller caught in a blast, a special the landing block claims and
+chains (on a fixture with exactly one free anchor, so the draw has one candidate
+whatever the seed), and one regression apiece for the three flock defects: a second
+propeller of the flock colour flying twice, a same-colour rainbow launching itself,
+and a bomb of that colour flying and then detonating where it stood.
 
 - [ ] **Step 6: Commit**
 
