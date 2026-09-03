@@ -101,6 +101,17 @@ test('saved game survives a round trip and restores every field', () => {
   assert.deepEqual(saved.board, board);
 });
 
+test('a rectangular saved game round-trips and a transposed shape is rejected', () => {
+  const board = makeBoard(6, 4, 1); // 6 rows by 4 columns
+  const json = serializeGame({ rows: 6, cols: 4, gemTypes: 5, board, points: 10, moves: 1, maxCombo: 1 }, 1);
+  const saved = parseSavedGame(json, { rows: 6, cols: 4, gemTypes: 5 });
+  assert.ok(saved, 'same shape resumes');
+  assert.equal(saved.rows, 6);
+  assert.equal(saved.cols, 4);
+  assert.deepEqual(saved.board, board);
+  assert.equal(parseSavedGame(json, { rows: 4, cols: 6, gemTypes: 5 }), null, 'a transposed shape is a different board');
+});
+
 test('parseSavedGame rejects anything that does not fit the current board', () => {
   const board = makeBoard(4, 4, 1);
   const json = serializeGame({ rows: 4, cols: 4, gemTypes: 5, board, points: 10, moves: 1, maxCombo: 1 });
