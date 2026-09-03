@@ -4,6 +4,11 @@ import {
   Engine,
   RNG,
   SPECIAL,
+  ARM,
+  ARMS_HORIZONTAL,
+  ARMS_VERTICAL,
+  ARMS_ALL,
+  beamCells,
   hasValidMoves,
   findValidMove,
   findMatches
@@ -436,4 +441,42 @@ test('Regeneration does not crash and produces valid board', () => {
     }
   }
   assert.equal(cellCount, 9, 'Board should be fully populated');
+});
+
+// --- beamCells --------------------------------------------------------------
+
+function keys(positions) {
+  return positions.map(p => `${p.r},${p.c}`).sort();
+}
+
+test('beamCells: all four arms from the centre of a 5x5 clear the full cross', () => {
+  const { cells, effects } = beamCells({ r: 2, c: 2 }, ARMS_ALL, 5, 5);
+  assert.equal(cells.length, 9, 'row 2 and column 2 overlap on the origin');
+  assert.deepEqual(effects.map(e => e.dir).sort(), ['down', 'left', 'right', 'up']);
+  assert.ok(effects.every(e => e.kind === 'beam' && e.from.r === 2 && e.from.c === 2));
+});
+
+test('beamCells: arms that point off the board clear nothing and draw nothing', () => {
+  const { cells, effects } = beamCells({ r: 0, c: 4 }, ARM.UP | ARM.RIGHT, 5, 5);
+  assert.deepEqual(keys(cells), ['0,4'], 'only the origin');
+  assert.equal(effects.length, 0);
+});
+
+test('beamCells: a single arm runs from the gem to the edge', () => {
+  const { cells, effects } = beamCells({ r: 3, c: 1 }, ARM.RIGHT, 4, 6);
+  assert.deepEqual(keys(cells), ['3,1', '3,2', '3,3', '3,4', '3,5']);
+  assert.deepEqual(effects, [{ kind: 'beam', from: { r: 3, c: 1 }, dir: 'right' }]);
+});
+
+test('beamCells: halfWidth 1 makes each arm three cells wide, including beside the origin', () => {
+  const { cells, effects } = beamCells({ r: 2, c: 2 }, ARMS_HORIZONTAL, 5, 5, 1);
+  assert.equal(cells.length, 15, 'rows 1..3 across the whole width');
+  assert.ok(keys(cells).includes('1,2') && keys(cells).includes('3,2'), 'cells above and below the origin are in the footprint');
+  assert.equal(effects.length, 6, 'two arms, three parallel sweeps each');
+});
+
+test('beamCells: constants agree with the bit layout', () => {
+  assert.equal(ARMS_HORIZONTAL, ARM.LEFT | ARM.RIGHT);
+  assert.equal(ARMS_VERTICAL, ARM.UP | ARM.DOWN);
+  assert.equal(ARMS_ALL, 15);
 });

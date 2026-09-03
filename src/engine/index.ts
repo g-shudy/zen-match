@@ -21,6 +21,23 @@ export interface Pos {
   c: number;
 }
 
+// A beam gem fires along its arms, one bit each, in board coordinates. A straight
+// five makes the two opposite arms of its axis; an L makes two adjacent arms, a T
+// three, a plus all four.
+export const ARM = { UP: 1, RIGHT: 2, DOWN: 4, LEFT: 8 } as const;
+export const ARMS_HORIZONTAL: number = ARM.LEFT | ARM.RIGHT;
+export const ARMS_VERTICAL: number = ARM.UP | ARM.DOWN;
+export const ARMS_ALL: number = ARM.UP | ARM.RIGHT | ARM.DOWN | ARM.LEFT;
+export type Arms = number;
+export type BeamDir = 'up' | 'right' | 'down' | 'left';
+
+const ARM_STEPS: ReadonlyArray<{ arm: number; dr: number; dc: number; dir: BeamDir }> = [
+  { arm: ARM.UP, dr: -1, dc: 0, dir: 'up' },
+  { arm: ARM.RIGHT, dr: 0, dc: 1, dir: 'right' },
+  { arm: ARM.DOWN, dr: 1, dc: 0, dir: 'down' },
+  { arm: ARM.LEFT, dr: 0, dc: -1, dir: 'left' }
+];
+
 export class RNG {
   private state: number;
 
@@ -59,7 +76,8 @@ export type RemovalAnim = 'matched' | 'exploding' | 'line-cleared' | 'rainbow-cl
 
 export type Effect =
   | { kind: 'explosion'; r: number; c: number }
-  | { kind: 'line'; direction: 'horizontal' | 'vertical'; row?: number; col?: number };
+  | { kind: 'line'; direction: 'horizontal' | 'vertical'; row?: number; col?: number }
+  | { kind: 'beam'; from: Pos; dir: BeamDir };
 
 export interface ScoreBreakdown {
   base: number;
@@ -141,6 +159,49 @@ export function boardToTypeString(board: Board): string {
 
 function keyFor(r: number, c: number): string {
   return `${r},${c}`;
+}
+
+export interface BeamResult {
+  cells: Pos[];
+  effects: Effect[];
+}
+
+// Every cell a beam gem at `origin` clears, plus one `beam` effect per sweep to draw.
+// Each arm runs from the gem to the board edge. `halfWidth` widens every arm
+// symmetrically (1 makes it three cells wide, the bomb + beam combo). The origin is
+// always included so the result is the full footprint; an arm that points straight
+// off the board contributes no cells and no effect.
+export function beamCells(origin: Pos, arms: Arms, rows: number, cols: number, halfWidth = 0): BeamResult {
+  const seen = new Set<string>();
+  const cells: Pos[] = [];
+  const effects: Effect[] = [];
+  const inBounds = (r: number, c: number): boolean => r >= 0 && r < rows && c >= 0 && c < cols;
+  const push = (r: number, c: number): void => {
+    if (!inBounds(r, c)) return;
+    const key = keyFor(r, c);
+    if (seen.has(key)) return;
+    seen.add(key);
+    cells.push({ r, c });
+  };
+
+  push(origin.r, origin.c);
+
+  for (const step of ARM_STEPS) {
+    if (!(arms & step.arm)) continue;
+    for (let w = -halfWidth; w <= halfWidth; w++) {
+      // Shift sideways: columns for a vertical arm, rows for a horizontal one.
+      const r0 = origin.r + (step.dr === 0 ? w : 0);
+      const c0 = origin.c + (step.dc === 0 ? w : 0);
+      if (!inBounds(r0, c0)) continue;
+      if (!inBounds(r0 + step.dr, c0 + step.dc)) continue; // zero-length: nothing to sweep
+      effects.push({ kind: 'beam', from: { r: r0, c: c0 }, dir: step.dir });
+      for (let k = 0; inBounds(r0 + step.dr * k, c0 + step.dc * k); k++) {
+        push(r0 + step.dr * k, c0 + step.dc * k);
+      }
+    }
+  }
+
+  return { cells, effects };
 }
 
 function isSpecial(cell: Cell | null): boolean {
