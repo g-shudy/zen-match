@@ -841,6 +841,30 @@ button {
   100% { filter: hue-rotate(360deg); }
 }
 
+/* The propeller: four blades that turn slowly, an overlay like the beam arms so
+   it reads in every palette. */
+.gem.special-propeller::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: conic-gradient(
+    rgba(255, 255, 255, 0.9) 0 12.5%, transparent 0 25%,
+    rgba(255, 255, 255, 0.9) 0 37.5%, transparent 0 50%,
+    rgba(255, 255, 255, 0.9) 0 62.5%, transparent 0 75%,
+    rgba(255, 255, 255, 0.9) 0 87.5%, transparent 0
+  );
+  -webkit-mask: radial-gradient(circle, #000 0 14%, transparent 15% 24%, #000 25% 58%, transparent 60%);
+  mask: radial-gradient(circle, #000 0 14%, transparent 15% 24%, #000 25% 58%, transparent 60%);
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.8));
+  animation: propellerSpin 4s linear infinite;
+  z-index: 2;
+}
+
+@keyframes propellerSpin {
+  to { transform: rotate(360deg); }
+}
+
 /* 7. Effects -------------------------------------------------------------- */
 
 .explosion-effect {
@@ -1417,7 +1441,8 @@ button {
 
   .gem.special-bomb::after,
   .gem.special-line::after,
-  .gem.special-rainbow::before {
+  .gem.special-rainbow::before,
+  .gem.special-propeller::after {
     animation: none;
   }
 

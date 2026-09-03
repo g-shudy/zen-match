@@ -492,6 +492,8 @@ function renderBoard(board: Board): void {
         if (arms & ARM.LEFT) gemEl.classList.add('arm-left');
       } else if (cell.special === SPECIAL.RAINBOW) {
         gemEl.classList.add('special-rainbow');
+      } else if (cell.special === SPECIAL.PROPELLER) {
+        gemEl.classList.add('special-propeller');
       }
 
       if (key.endsWith('|selected')) gemEl.classList.add('selected');

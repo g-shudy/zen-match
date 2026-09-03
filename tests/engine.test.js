@@ -347,8 +347,10 @@ test('An abandoned move leaves the board hole-free where the last pulled wave le
   assert.ok(pulled > 0);
   const board = engine.state.board;
   assert.ok(board.every(row => row.every(cell => cell !== null)), 'no holes after a fill frame');
-  const again = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
-  assert.equal(again.moveValid, true, 'the engine judges the next move against the abandoned board');
+  const next = engine.findValidMove();
+  assert.ok(next, 'the abandoned board still has a legal move');
+  const again = engine.swap({ r: next.r1, c: next.c1 }, { r: next.r2, c: next.c2 });
+  assert.equal(again.moveValid, true, 'the engine accepts a legal move on the abandoned board');
 });
 
 test('Refill does not manufacture immediate matches', () => {
@@ -907,14 +909,18 @@ test('A square sharing two cells with a 3-run is five cells without an intersect
   assert.equal(gem.special, SPECIAL.PROPELLER);
 });
 
-test('A trial swap that only completes a square is a legal move', () => {
+test('A swap whose only match is a square is judged legal', () => {
   const board = cyclicBoard();
   board[1][1] = makeCell(0);
   board[1][2] = makeCell(0);
   board[2][1] = makeCell(0);
   board[3][2] = makeCell(0);
   assert.equal(hasValidMoves(board, 5, 5), true);
-  assert.deepEqual(findValidMove(board, 5, 5), { r1: 2, c1: 2, r2: 3, c2: 2 }, 'the only legal move completes the square');
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  engine.setBoard(board);
+  const result = play(engine, { r: 3, c: 2 }, { r: 2, c: 2 });
+  assert.equal(result.moveValid, true, 'the square alone makes the swap legal');
+  assert.equal(placedSpecial(result).gem.special, SPECIAL.PROPELLER, 'and it is the square that matched');
 });
 
 test('The refill guard never completes a square with the three cells already placed', () => {

@@ -43,11 +43,11 @@
 ### Task 1: Squares are matches
 
 **Files:**
-- Modify: `src/engine/index.ts` (`SPECIAL` ~1-6, `MatchGroup` ~132-138, `pickNonMatchingType` ~253-270, `findMatches` ~704-822, ladder in `cascadeWaves` ~992-1011, `specialPriority` ~1053, `wouldMatchAt` ~1168-1178)
+- Modify: `src/engine/index.ts` (`SPECIAL` ~1-6, `MatchGroup` ~132-138, `pickNonMatchingType` ~253-270, `findMatches` ~704-822, ladder in `cascadeWaves` ~992-1011, `specialPriority` ~1053, `wouldMatchAt` ~1168-1178), `index.html` (legend, before the Rainbow entry), `src/main.ts` (`renderBoard`, after the rainbow branch), `src/styles.css` (glyph, after the rainbow glyph rules, plus the reduced-motion selector list)
 - Test: `tests/engine.test.js`
 
 **Interfaces:**
-- Produces: `SPECIAL.PROPELLER = 'propeller'` (so `Special` includes it), `MatchGroup.square: Pos | null` (the anchor of the first square in the group), propellers placed by the ladder with bonus 75. Task 2 adds their behaviour.
+- Produces: `SPECIAL.PROPELLER = 'propeller'` (so `Special` includes it), `MatchGroup.square: Pos | null` (the anchor of the first square in the group), propellers placed by the ladder with bonus 75, the `special-propeller` class and its glyph, and the legend entry (brought forward from Tasks 3 and 4 so `tests/help-legend.test.js`'s structural check never sees a `SPECIAL` value it can't find a sample for). Task 2 adds the propeller's behaviour; Task 3 adds its flight animation.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -115,14 +115,18 @@ test('A square sharing two cells with a 3-run is five cells without an intersect
   assert.equal(gem.special, SPECIAL.PROPELLER);
 });
 
-test('A trial swap that only completes a square is a legal move', () => {
+test('A swap whose only match is a square is judged legal', () => {
   const board = cyclicBoard();
   board[1][1] = makeCell(0);
   board[1][2] = makeCell(0);
   board[2][1] = makeCell(0);
   board[3][2] = makeCell(0);
   assert.equal(hasValidMoves(board, 5, 5), true);
-  assert.deepEqual(findValidMove(board, 5, 5), { r1: 2, c1: 2, r2: 3, c2: 2 }, 'the only legal move completes the square');
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  engine.setBoard(board);
+  const result = play(engine, { r: 3, c: 2 }, { r: 2, c: 2 });
+  assert.equal(result.moveValid, true, 'the square alone makes the swap legal');
+  assert.equal(placedSpecial(result).gem.special, SPECIAL.PROPELLER, 'and it is the square that matched');
 });
 
 test('The refill guard never completes a square with the three cells already placed', () => {
@@ -143,7 +147,7 @@ test('The refill guard never completes a square with the three cells already pla
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `node build.mjs --test && node --test tests/engine.test.js`
-Expected: the six new tests fail (`SPECIAL.PROPELLER` undefined, no square group, `findValidMove` returns another move or null, the guard lets 0 through).
+Expected: the six new tests fail (`SPECIAL.PROPELLER` undefined, no square group, the square-only swap's `moveValid` is false with nothing placed, the guard lets 0 through).
 
 - [ ] **Step 3: Detect squares and place propellers**
 
@@ -225,22 +229,88 @@ In `src/engine/index.ts`:
 
    and update the ladder comment above it to list the propeller. Change `specialPriority` to `{ [SPECIAL.RAINBOW]: 4, [SPECIAL.LINE]: 3, [SPECIAL.PROPELLER]: 2, [SPECIAL.BOMB]: 1 }`.
 
-- [ ] **Step 4: Run the tests, the typecheck and the whole suite**
+- [ ] **Step 4: Legend entry and glyph, so the structural test stays green**
+
+`tests/help-legend.test.js`'s `'every special the engine can create has a legend entry'` walks every value of `SPECIAL` and fails the moment `PROPELLER` exists with nothing to show for it. Bring its legend entry and glyph forward from Tasks 3 and 4 rather than leave the suite red until they land:
+
+In `index.html` add a legend entry before the Rainbow entry:
+
+```html
+            <li>
+              <span class="gem gem-4 sample special-propeller" aria-hidden="true"><span class="gem-shape shape-4"></span></span>
+              <span class="legend-text"><strong>Propeller</strong>A 2&times;2 block of one color. When it goes off it lifts away, lands somewhere else on the board, and pops a 2&times;2 there.</span>
+            </li>
+```
+
+In `renderBoard`, add after the rainbow branch:
+
+```ts
+      } else if (cell.special === SPECIAL.PROPELLER) {
+        gemEl.classList.add('special-propeller');
+      }
+```
+
+In `src/styles.css`, after the rainbow glyph rules add:
+
+```css
+/* The propeller: four blades that turn slowly, an overlay like the beam arms so
+   it reads in every palette. */
+.gem.special-propeller::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: conic-gradient(
+    rgba(255, 255, 255, 0.9) 0 12.5%, transparent 0 25%,
+    rgba(255, 255, 255, 0.9) 0 37.5%, transparent 0 50%,
+    rgba(255, 255, 255, 0.9) 0 62.5%, transparent 0 75%,
+    rgba(255, 255, 255, 0.9) 0 87.5%, transparent 0
+  );
+  -webkit-mask: radial-gradient(circle, #000 0 14%, transparent 15% 24%, #000 25% 58%, transparent 60%);
+  mask: radial-gradient(circle, #000 0 14%, transparent 15% 24%, #000 25% 58%, transparent 60%);
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.8));
+  animation: propellerSpin 4s linear infinite;
+  z-index: 2;
+}
+
+@keyframes propellerSpin {
+  to { transform: rotate(360deg); }
+}
+```
+
+In the reduced-motion block, next to the other special glyph animations, add `.gem.special-propeller::after` to the selector list that sets `animation: none`.
+
+Task 3 still adds its own `.gem.flown`/`.gem.flying` rules after these when it builds the flight animation; only the glyph and the legend sample move here.
+
+- [ ] **Step 5: Run the tests, the typecheck and the whole suite**
 
 Run: `node build.mjs --test && node --test tests/engine.test.js && npm run typecheck && npm test`
-Expected: 51 engine tests pass; typecheck clean; 79 total. Watch the pre-existing `'init produces a settled, playable board'` and `'Refill does not manufacture immediate matches'` tests: they now also demand square-free boards. If either fails (two colours on 16x16 is the stress case), do not weaken it; report NEEDS_CONTEXT with the failing sizes and seeds.
+Expected: 51 engine tests pass; typecheck clean; 79 total, all green including `tests/help-legend.test.js`. Watch the pre-existing `'init produces a settled, playable board'` and `'Refill does not manufacture immediate matches'` tests: they now also demand square-free boards. If either fails (two colours on 16x16 is the stress case), do not weaken it; report NEEDS_CONTEXT with the failing sizes and seeds.
 
-- [ ] **Step 5: Commit**
+Two other pre-existing tests can be caught out by the same RNG-stream shift (the refill guard now rejects one more candidate per cell, so every draw after the first rejection differs from before) even though they don't touch squares themselves:
+- `'A swap whose only match is a square is judged legal'`'s fixture (above) has a second, incidental valid move if written as a bare `findValidMove` coordinate check instead of asserting on the intended swap directly — column 2 already holds colour 0 two rows apart, and a swap between them makes a plain vertical 3-run before row-major scan order ever reaches the square swap. Assert on `play(...).moveValid` and the placed special, not on `findValidMove`'s exact return value, as Step 1 now does.
+- `'An abandoned move leaves the board hole-free where the last pulled wave left it, and the engine accepts the next move'` (seed 5, gemTypes 2, 8x8) hard-codes its post-abandon probe as `engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 })`. Once the refill guard changes, that pair can land on two cells that already match by chance, which is a legitimate no-op, not a broken engine. Replace the probe with:
+
+```js
+  const next = engine.findValidMove();
+  assert.ok(next, 'the abandoned board still has a legal move');
+  const again = engine.swap({ r: next.r1, c: next.c1 }, { r: next.r2, c: next.c2 });
+  assert.equal(again.moveValid, true, 'the engine accepts a legal move on the abandoned board');
+```
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/engine/index.ts tests/engine.test.js
+git add src/engine/index.ts tests/engine.test.js index.html src/main.ts src/styles.css
 git commit -m "Make a 2x2 of one colour a match that creates a propeller
 
 Squares join the matcher alongside runs, so a square that touches a run
 of its colour floods into one group, and the ladder places a propeller for
 a group with a square and no intersection. The refill guard and the settle
 predicate learn the square windows so a refill never hands one out. The
-propeller's behaviour follows in the next task.
+legend entry and glyph land now too, so the structural test never sees a
+SPECIAL value it can't show a sample for. The propeller's flight behaviour
+follows in the next task.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -565,12 +635,12 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 3: Storage, glyph and the flight on the page
 
 **Files:**
-- Modify: `src/storage.ts` (`SPECIALS` ~133), `src/main.ts` (`renderBoard` ~484-495, `showEffects` ~612-628, `playSubSteps` ~755-772, the `remove` case ~815-850), `src/styles.css` (glyphs ~812-845, removal animations ~634-671, reduced motion ~1440+)
+- Modify: `src/storage.ts` (`SPECIALS` ~133), `src/main.ts` (`showEffects` ~612-628, `playSubSteps` ~755-772, the `remove` case ~815-850), `src/styles.css` (flight classes after the propeller glyph rules Task 1 added, removal animations ~634-671, reduced motion ~1440+)
 - Test: `tests/storage.test.js`
 
 **Interfaces:**
-- Consumes: `flight` effects, the `flown` animation, `layout`, `cellCenter`, `reducedMotion`, `gems`, `posIdx`.
-- Produces: `special-propeller` class; `playFlights(effects): Promise<void>`; the legend sample class Task 4 uses.
+- Consumes: `flight` effects, `layout`, `cellCenter`, `reducedMotion`, `gems`, `posIdx`, the `special-propeller` class and glyph Task 1 added (a flying clone inherits it via `cloneNode`).
+- Produces: the `flown`/`flying` animation classes; `playFlights(effects): Promise<void>`.
 
 - [ ] **Step 1: Storage**
 
@@ -588,43 +658,13 @@ Add to `tests/storage.test.js`, next to the arms-rejection cases:
 
 Run `node build.mjs --test && node --test tests/storage.test.js` and see the first assertion fail; then in `src/storage.ts` change `SPECIALS` to `new Set<unknown>([null, 'bomb', 'line', 'rainbow', 'propeller'])`, and see it pass.
 
-- [ ] **Step 2: Glyph and classes**
+- [ ] **Step 2: Flight classes**
 
-In `renderBoard`, add after the rainbow branch:
+The `special-propeller` glyph and its legend entry already exist (Task 1 brought them forward so the structural test never went red). This step only adds the classes the flight animation drives.
 
-```ts
-      } else if (cell.special === SPECIAL.PROPELLER) {
-        gemEl.classList.add('special-propeller');
-      }
-```
-
-In `src/styles.css`, after the rainbow glyph rules add:
+In `src/styles.css`, after the propeller glyph rules add:
 
 ```css
-/* The propeller: four blades that turn slowly, an overlay like the beam arms so
-   it reads in every palette. */
-.gem.special-propeller::after {
-  content: '';
-  position: absolute;
-  inset: 3px;
-  border-radius: 50%;
-  background: conic-gradient(
-    rgba(255, 255, 255, 0.9) 0 12.5%, transparent 0 25%,
-    rgba(255, 255, 255, 0.9) 0 37.5%, transparent 0 50%,
-    rgba(255, 255, 255, 0.9) 0 62.5%, transparent 0 75%,
-    rgba(255, 255, 255, 0.9) 0 87.5%, transparent 0
-  );
-  -webkit-mask: radial-gradient(circle, #000 0 14%, transparent 15% 24%, #000 25% 58%, transparent 60%);
-  mask: radial-gradient(circle, #000 0 14%, transparent 15% 24%, #000 25% 58%, transparent 60%);
-  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.8));
-  animation: propellerSpin 4s linear infinite;
-  z-index: 2;
-}
-
-@keyframes propellerSpin {
-  to { transform: rotate(360deg); }
-}
-
 /* The gem that took off: its flying copy carries the visual. */
 .gem.flown {
   opacity: 0;
@@ -638,8 +678,6 @@ In `src/styles.css`, after the rainbow glyph rules add:
   will-change: transform;
 }
 ```
-
-In the reduced-motion block, next to the other special glyph animations, add `.gem.special-propeller::after` to the selector list that sets `animation: none`.
 
 - [ ] **Step 3: Flights on the page**
 
@@ -737,26 +775,17 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 4: Docs and release 2.4.0
 
 **Files:**
-- Modify: `index.html` (legend ~178-218 and the combining paragraph), `README.md` (specials block ~27-39), `docs/project-log.md` (append), `docs/zen-match-feature-pipeline.md` (Phase 5), `package.json` + `package-lock.json`
+- Modify: `index.html` (combining paragraph; the legend entry itself landed in Task 1), `README.md` (specials block ~27-39), `docs/project-log.md` (append), `docs/zen-match-feature-pipeline.md` (Phase 5), `package.json` + `package-lock.json`
 
 - [ ] **Step 1: Legend and copy**
 
-In `index.html` add a legend entry before the Rainbow entry:
-
-```html
-            <li>
-              <span class="gem gem-4 sample special-propeller" aria-hidden="true"><span class="gem-shape shape-4"></span></span>
-              <span class="legend-text"><strong>Propeller</strong>A 2&times;2 block of one color. When it goes off it lifts away, lands somewhere else on the board, and pops a 2&times;2 there.</span>
-            </li>
-```
+The Propeller legend entry already exists (Task 1). This step is just the combining paragraph, which needs the propeller's combo behaviour once Task 2 has defined it.
 
 Replace the combining paragraph with:
 
 ```html
           <p>Swap two special gems together for something bigger. Two beam gems fire every arm either of them had, so a horizontal and a vertical line make a cross. A bomb with a beam gem fires each beam three wide. A rainbow with a beam gem gives every gem of that color the same beams, and they all fire. Two bombs make a wider blast, and a rainbow with a bomb sets off every gem of that color. A propeller carries a bomb or a beam gem to wherever it lands; two propellers both fly; a rainbow with a propeller sends every gem of that color flying.</p>
 ```
-
-Run `node build.mjs --test && node --test tests/help-legend.test.js`: the structural test now requires the propeller entry and passes with it.
 
 - [ ] **Step 2: README, log, pipeline, version**
 
