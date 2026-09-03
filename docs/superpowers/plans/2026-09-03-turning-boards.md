@@ -223,7 +223,7 @@ export function dropGems(board: Board, rows: number, cols: number, gravity: Grav
         const to = line[write];
         board[to.r][to.c] = cell;
         board[from.r][from.c] = null;
-        moves.push({ from, to, type: cell.type });
+        moves.push({ from: { r: from.r, c: from.c }, to: { r: to.r, c: to.c }, type: cell.type });
       }
       write++;
     }
@@ -232,6 +232,7 @@ export function dropGems(board: Board, rows: number, cols: number, gravity: Grav
   return moves;
 }
 
+// Expects dropGems to have run first, so every empty in a line sits at the entry edge; that is what makes "every new gem travels n cells" true.
 export function fillGems(board: Board, rows: number, cols: number, gemTypes: number, rng: RNG, gravity: Gravity): GemMove[] {
   const moves: GemMove[] = [];
   const step = GRAVITY_STEP[gravity];
