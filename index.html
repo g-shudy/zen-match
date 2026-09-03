@@ -67,7 +67,7 @@
     <div class="board" id="board" role="group" aria-label="Game board"></div>
 
     <nav class="toolbar" aria-label="Game controls">
-      <button class="btn btn-primary" id="newGame" type="button">
+      <button class="btn btn-primary" id="newGame" type="button" aria-description="Press and hold for one second" title="Press and hold for one second">
         <svg class="icon" aria-hidden="true"><use href="#i-new"/></svg>
         <span>New Game</span>
       </button>
@@ -115,6 +115,10 @@
             <div><dt>Per move</dt><dd id="statAvg">0</dd></div>
             <div><dt>Longest cascade</dt><dd id="statCombo">0</dd></div>
           </dl>
+          <div class="row-action">
+            <button class="btn" id="settingsNewGame" type="button">Start new game</button>
+          </div>
+          <p class="hint">Starts over with the current size and colors. The New Game button under the board needs a one-second hold, so a stray tap never ends a game.</p>
         </section>
 
         <section class="group">

@@ -360,6 +360,55 @@ button {
   background: var(--accent-hover);
 }
 
+/* Hold-to-start ring. A conic fill sweeps around New Game over --hold-ms while
+   the pointer or key is down, masked to a 3px band that follows the pill. */
+@property --hold-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+#newGame {
+  position: relative;
+  touch-action: none;
+}
+
+#newGame::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 999px;
+  padding: 3px;
+  background: conic-gradient(var(--accent) var(--hold-angle), transparent 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+#newGame.holding::after {
+  opacity: 1;
+  animation: holdFill var(--hold-ms, 1000ms) linear forwards;
+}
+
+@keyframes holdFill {
+  from { --hold-angle: 0deg; }
+  to { --hold-angle: 360deg; }
+}
+
+#newGame.held {
+  animation: heldPulse 0.32s var(--ease);
+}
+
+@keyframes heldPulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
 .icon-btn {
   width: 44px;
   height: 44px;
@@ -979,6 +1028,11 @@ button {
   margin-top: 8px;
 }
 
+.row-action {
+  display: flex;
+  margin-top: 12px;
+}
+
 /* Segmented control */
 .seg {
   display: inline-flex;
@@ -1330,5 +1384,10 @@ button {
   .toast,
   .board {
     transition: none;
+  }
+
+  /* The hold ring stays: it is the progress indicator. Only the completion pulse goes. */
+  #newGame.held {
+    animation: none;
   }
 }

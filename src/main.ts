@@ -22,6 +22,7 @@ import {
   type PaletteId,
   type Settings
 } from './storage';
+import { createHold } from './hold';
 
 declare const __APP_VERSION__: string;
 
@@ -108,7 +109,8 @@ const config = {
     dissolve: 420,
     reform: 520,
     glow: 1400,
-    ambient: 1200
+    ambient: 1200,
+    holdToStart: 1000
   }
 };
 
@@ -149,6 +151,7 @@ const helpSheet = getEl<HTMLDialogElement>('helpSheet');
 const sizeSeg = getEl<HTMLDivElement>('sizeSeg');
 const colorsSeg = getEl<HTMLDivElement>('colorsSeg');
 const settingsDone = getEl<HTMLButtonElement>('settingsDone');
+const settingsNewGame = getEl<HTMLButtonElement>('settingsNewGame');
 const statMoves = getEl<HTMLElement>('statMoves');
 const statPoints = getEl<HTMLElement>('statPoints');
 const statAvg = getEl<HTMLElement>('statAvg');
@@ -1218,7 +1221,52 @@ settingsBtn.addEventListener('click', () => {
 
 helpBtn.addEventListener('click', () => openSheet(helpSheet));
 
-newGameBtn.addEventListener('click', () => {
+// New Game is a hold, not a tap: a stray touch during a long cascade must not
+// throw the game away. The ring on the button fills over the hold.
+const hold = createHold({
+  durationMs: config.timing.holdToStart,
+  onStart: () => newGameBtn.classList.add('holding'),
+  onCancel: () => newGameBtn.classList.remove('holding'),
+  onComplete: () => {
+    newGameBtn.classList.remove('holding');
+    if (!reducedMotion()) {
+      newGameBtn.classList.add('held');
+      window.setTimeout(() => newGameBtn.classList.remove('held'), 320);
+    }
+    void startNewGame();
+  }
+});
+newGameBtn.style.setProperty('--hold-ms', `${config.timing.holdToStart}ms`);
+
+newGameBtn.addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  hold.press();
+});
+for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
+  newGameBtn.addEventListener(type, () => hold.release());
+}
+window.addEventListener('blur', () => hold.release());
+newGameBtn.addEventListener('contextmenu', event => {
+  event.preventDefault();
+  hold.release();
+});
+// A tap or click on its own does nothing; only a completed hold starts a game.
+newGameBtn.addEventListener('click', event => event.preventDefault());
+newGameBtn.addEventListener('keydown', event => {
+  if (event.key !== ' ' && event.key !== 'Enter') return;
+  event.preventDefault();
+  if (!event.repeat) hold.press();
+});
+newGameBtn.addEventListener('keyup', event => {
+  if (event.key === ' ' || event.key === 'Enter') hold.release();
+});
+
+// The sheet's plain button is the path for anyone who cannot hold; it already
+// sits behind a deliberate step, so a tap is safe here.
+settingsNewGame.addEventListener('click', () => {
+  revertPending();
+  syncSettingsUI();
+  closeSheet(settingsSheet);
   void startNewGame();
 });
 

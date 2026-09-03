@@ -26,7 +26,7 @@ const browserConfig = {
 // Named entries: with bare paths esbuild keys output on the common ancestor
 // directory and writes dist/engine/index.js, which the tests do not import.
 const nodeConfig = {
-  entryPoints: { engine: 'src/engine/index.ts', storage: 'src/storage.ts' },
+  entryPoints: { engine: 'src/engine/index.ts', storage: 'src/storage.ts', hold: 'src/hold.ts' },
   outdir: 'dist',
   bundle: true,
   format: 'esm',
