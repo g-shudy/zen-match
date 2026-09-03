@@ -573,11 +573,13 @@ test('toBoardDelta rotates a screen delta into board space', () => {
   // Screen right (dx 1) and screen down (dy 1) under each board rotation.
   const right = { 0: { dr: 0, dc: 1 }, 90: { dr: -1, dc: 0 }, 180: { dr: 0, dc: -1 }, 270: { dr: 1, dc: 0 } };
   const down = { 0: { dr: 1, dc: 0 }, 90: { dr: 0, dc: 1 }, 180: { dr: -1, dc: 0 }, 270: { dr: 0, dc: -1 } };
+  // Negating a literal 0 gives -0, which strict deep-equal distinguishes from 0.
+  const flip = d => ({ dr: d.dr === 0 ? 0 : -d.dr, dc: d.dc === 0 ? 0 : -d.dc });
   for (const rotation of [0, 90, 180, 270]) {
     assert.deepEqual(toBoardDelta(1, 0, rotation), right[rotation], `right at ${rotation}`);
     assert.deepEqual(toBoardDelta(0, 1, rotation), down[rotation], `down at ${rotation}`);
-    assert.deepEqual(toBoardDelta(-1, 0, rotation), { dr: -right[rotation].dr, dc: -right[rotation].dc }, `left at ${rotation}`);
-    assert.deepEqual(toBoardDelta(0, -1, rotation), { dr: -down[rotation].dr, dc: -down[rotation].dc }, `up at ${rotation}`);
+    assert.deepEqual(toBoardDelta(-1, 0, rotation), flip(right[rotation]), `left at ${rotation}`);
+    assert.deepEqual(toBoardDelta(0, -1, rotation), flip(down[rotation]), `up at ${rotation}`);
   }
 });
 
@@ -633,17 +635,19 @@ export function boardPose(deviceAngle: number, turns: number): { rotation: Rotat
 
 // A screen-space delta (x right, y down) expressed in board rows and columns.
 // The board appears rotated clockwise by `rotation`, so a screen vector is the
-// board vector rotated the other way.
+// board vector rotated the other way. Results are normalised so a negated zero
+// never leaks out as -0.
 export function toBoardDelta(dx: number, dy: number, rotation: Rotation): { dr: number; dc: number } {
+  const zero = (v: number): number => (v === 0 ? 0 : v);
   switch (rotation) {
     case 90:
-      return { dr: -dx, dc: dy };
+      return { dr: zero(-dx), dc: zero(dy) };
     case 180:
-      return { dr: -dy, dc: -dx };
+      return { dr: zero(-dy), dc: zero(-dx) };
     case 270:
-      return { dr: dx, dc: -dy };
+      return { dr: zero(dx), dc: zero(-dy) };
     default:
-      return { dr: dy, dc: dx };
+      return { dr: zero(dy), dc: zero(dx) };
   }
 }
 ```
