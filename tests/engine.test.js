@@ -667,3 +667,28 @@ test('The same seed, board and swap produce identical frames', () => {
   };
   assert.equal(JSON.stringify(make().frames), JSON.stringify(make().frames));
 });
+
+test('A beam gem that reaches the engine without arms fires as a horizontal line on every path', () => {
+  // Matched in a chain: (1,1) has null arms; swapping (2,0) and (2,1) matches column 1 rows 0-2.
+  const chain = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  const chainBoard = [
+    [1, 0, 3, 1, 2],
+    [2, 0, 3, 2, 3],
+    [0, 2, 1, 3, 1],
+    [1, 3, 2, 1, 2],
+    [2, 1, 3, 2, 3]
+  ].map(row => row.map(t => makeCell(t)));
+  chainBoard[1][1] = makeCell(0, SPECIAL.LINE, null);
+  chain.setBoard(chainBoard);
+  const chainFrame = removeFrame(chain.swap({ r: 2, c: 0 }, { r: 2, c: 1 }));
+  assert.deepEqual(keys(chainFrame.positions), ['0,1', '1,0', '1,1', '1,2', '1,3', '1,4', '2,1']);
+
+  // Beam + beam with both masks missing: the union is one horizontal line, not a cross.
+  const combo = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  const comboBoard = cyclicBoard();
+  comboBoard[2][2] = makeCell(2, SPECIAL.LINE, null);
+  comboBoard[2][3] = makeCell(3, SPECIAL.LINE, null);
+  combo.setBoard(comboBoard);
+  const comboFrame = removeFrame(combo.swap({ r: 2, c: 2 }, { r: 2, c: 3 }));
+  assert.deepEqual(keys(comboFrame.positions), ['2,0', '2,1', '2,2', '2,3', '2,4']);
+});

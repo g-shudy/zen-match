@@ -407,7 +407,7 @@ export class Engine {
         } else if (otherSpecial === SPECIAL.LINE) {
           const targetType = gem1IsRainbow ? gem2?.type : gem1?.type;
           const lineGem = gem1IsRainbow ? gem2 : gem1;
-          const arms = lineGem?.arms ?? ARMS_HORIZONTAL;
+          const arms = armsOf(lineGem);
 
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
@@ -453,8 +453,8 @@ export class Engine {
         effects.push({ kind: 'explosion', r: pos1.r, c: pos1.c });
         points = 1000 + toRemove.size * 15;
       } else if (isLineCombo) {
-        const arms = (gem1?.arms ?? 0) | (gem2?.arms ?? 0);
-        const beam = beamCells({ r: pos1.r, c: pos1.c }, arms || ARMS_ALL, rows, cols);
+        const arms = armsOf(gem1) | armsOf(gem2);
+        const beam = beamCells({ r: pos1.r, c: pos1.c }, arms, rows, cols);
         claimCells(toRemove, animationClasses, beam.cells, 'line-cleared');
         effects.push(...beam.effects);
         points = 800 + toRemove.size * 12;
@@ -462,7 +462,7 @@ export class Engine {
         const lineGem = gem1Special === SPECIAL.LINE ? gem1 : gem2;
         // After the swap the beam gem sits where the other gem started.
         const linePos = gem1Special === SPECIAL.LINE ? { r: pos2.r, c: pos2.c } : { r: pos1.r, c: pos1.c };
-        const beam = beamCells(linePos, lineGem?.arms ?? ARMS_HORIZONTAL, rows, cols, 1);
+        const beam = beamCells(linePos, armsOf(lineGem), rows, cols, 1);
         claimCells(toRemove, animationClasses, beam.cells, 'line-cleared');
         effects.push(...beam.effects);
         points = 1200 + toRemove.size * 15;
@@ -674,6 +674,12 @@ function claimCells(toRemove: Set<string>, animationClasses: Map<string, Removal
   }
 }
 
+// A beam gem always carries arms once it exists; the fallback only guards a cell
+// that reached the engine without them, and every path must agree on it.
+function armsOf(cell: Cell | null | undefined): Arms {
+  return cell?.arms ?? ARMS_HORIZONTAL;
+}
+
 export function findMatches(board: Board, rows: number, cols: number): MatchGroup[] {
   const matchedCells = new Map<string, { r: number; c: number; type: number; direction: 'horizontal' | 'vertical'; isComplex?: boolean }>();
 
@@ -850,7 +856,7 @@ function activateSpecialsInRemovalSet(
         bonusPoints += 150;
       } else if (gem.special === SPECIAL.LINE) {
         chainCount++;
-        const beam = beamCells({ r, c }, gem.arms ?? ARMS_HORIZONTAL, rows, cols);
+        const beam = beamCells({ r, c }, armsOf(gem), rows, cols);
         for (const pos of beam.cells) {
           const newKey = keyFor(pos.r, pos.c);
           if (toRemove.has(newKey)) continue;
