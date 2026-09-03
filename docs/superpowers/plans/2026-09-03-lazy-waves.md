@@ -654,7 +654,7 @@ Under the *This game* section, directly after the closing `</dl>` of the stats, 
           <div class="row-action">
             <button class="btn" id="settingsNewGame" type="button">Start new game</button>
           </div>
-          <p class="hint">Starts over with the current size and colors. The New Game button under the board needs a one-second hold, so a stray tap never ends a game.</p>
+          <p class="hint">Starts over with the size and colors shown above. The New Game button under the board needs a one-second hold, so a stray tap never ends a game.</p>
 ```
 
 In `src/main.ts`:
@@ -678,7 +678,11 @@ with:
 const hold = createHold({
   durationMs: config.timing.holdToStart,
   onStart: () => newGameBtn.classList.add('holding'),
-  onCancel: () => newGameBtn.classList.remove('holding'),
+  onCancel: () => {
+    // Keep the same animation, paused, while the ring fades at whatever fill it reached.
+    newGameBtn.classList.replace('holding', 'draining');
+    window.setTimeout(() => newGameBtn.classList.remove('draining'), 180);
+  },
   onComplete: () => {
     newGameBtn.classList.remove('holding');
     if (!reducedMotion()) {
@@ -690,8 +694,13 @@ const hold = createHold({
 });
 newGameBtn.style.setProperty('--hold-ms', `${config.timing.holdToStart}ms`);
 
+// Only a completed hold starts a game. There is deliberately no click handler: a
+// tap or a click on its own does nothing.
 newGameBtn.addEventListener('pointerdown', event => {
   if (event.button !== 0) return;
+  // Touch gets implicit pointer capture, which would swallow pointerleave; release
+  // it so a finger that slides off the button cancels the hold like a mouse does.
+  if (newGameBtn.hasPointerCapture(event.pointerId)) newGameBtn.releasePointerCapture(event.pointerId);
   hold.press();
 });
 for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
@@ -702,8 +711,6 @@ newGameBtn.addEventListener('contextmenu', event => {
   event.preventDefault();
   hold.release();
 });
-// A tap or click on its own does nothing; only a completed hold starts a game.
-newGameBtn.addEventListener('click', event => event.preventDefault());
 newGameBtn.addEventListener('keydown', event => {
   if (event.key !== ' ' && event.key !== 'Enter') return;
   event.preventDefault();
@@ -713,11 +720,13 @@ newGameBtn.addEventListener('keyup', event => {
   if (event.key === ' ' || event.key === 'Enter') hold.release();
 });
 
-// The sheet's plain button is the path for anyone who cannot hold; it already
-// sits behind a deliberate step, so a tap is safe here.
+// Starts a new game with whatever the sheet shows: a pending size or colour
+// change is applied first, so this button and the footer never disagree. It is
+// the no-hold path for anyone who cannot hold New Game.
 settingsNewGame.addEventListener('click', () => {
-  revertPending();
-  syncSettingsUI();
+  settings.gridSize = pending.gridSize;
+  settings.gemTypes = pending.gemTypes;
+  persistSettings();
   closeSheet(settingsSheet);
   void startNewGame();
 });
@@ -739,6 +748,11 @@ In `src/styles.css`, after the `.btn-primary:hover` rule add:
   touch-action: none;
 }
 
+/* The ring is the press feedback; no press-scale, so the completion pulse does not pop. */
+#newGame:active {
+  transform: none;
+}
+
 #newGame::after {
   content: '';
   position: absolute;
@@ -758,6 +772,11 @@ In `src/styles.css`, after the `.btn-primary:hover` rule add:
 #newGame.holding::after {
   opacity: 1;
   animation: holdFill var(--hold-ms, 1000ms) linear forwards;
+}
+
+#newGame.draining::after {
+  animation: holdFill var(--hold-ms, 1000ms) linear forwards paused;
+  opacity: 0;
 }
 
 @keyframes holdFill {

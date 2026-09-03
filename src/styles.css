@@ -373,6 +373,11 @@ button {
   touch-action: none;
 }
 
+/* The ring is the press feedback; no press-scale, so the completion pulse does not pop. */
+#newGame:active {
+  transform: none;
+}
+
 #newGame::after {
   content: '';
   position: absolute;
@@ -392,6 +397,11 @@ button {
 #newGame.holding::after {
   opacity: 1;
   animation: holdFill var(--hold-ms, 1000ms) linear forwards;
+}
+
+#newGame.draining::after {
+  animation: holdFill var(--hold-ms, 1000ms) linear forwards paused;
+  opacity: 0;
 }
 
 @keyframes holdFill {
