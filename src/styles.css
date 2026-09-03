@@ -665,45 +665,35 @@ button {
   50% { transform: scale(1.2); opacity: 0.3; }
 }
 
+/* Beam gems draw one bar per arm from the centre to the gem's edge, plus a hub. The
+   bars are background layers on ::after, so any mix of arms needs no extra DOM. */
 .gem.special-line::after {
   content: '';
   position: absolute;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+  inset: 0;
+  --bar: rgba(255, 255, 255, 0.92);
+  --arm-up: transparent;
+  --arm-right: transparent;
+  --arm-down: transparent;
+  --arm-left: transparent;
+  background:
+    radial-gradient(circle, var(--bar) 0 3px, transparent 4px) 50% 50% / 100% 100% no-repeat,
+    linear-gradient(var(--arm-up), var(--arm-up)) 50% 0 / 4px 50% no-repeat,
+    linear-gradient(var(--arm-right), var(--arm-right)) 100% 50% / 50% 4px no-repeat,
+    linear-gradient(var(--arm-down), var(--arm-down)) 50% 100% / 4px 50% no-repeat,
+    linear-gradient(var(--arm-left), var(--arm-left)) 0 50% / 50% 4px no-repeat;
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.8));
   animation: lineGlow 1s ease-in-out infinite;
 }
 
-.gem.special-line.horizontal::after {
-  width: 100%;
-  height: 4px;
-}
-
-.gem.special-line.vertical::after {
-  width: 4px;
-  height: 100%;
-}
-
-.gem.special-line.cross::before,
-.gem.special-line.cross::after {
-  content: '';
-  position: absolute;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
-}
-
-.gem.special-line.cross::before {
-  width: 100%;
-  height: 4px;
-}
-
-.gem.special-line.cross::after {
-  width: 4px;
-  height: 100%;
-}
+.gem.arm-up::after { --arm-up: var(--bar); }
+.gem.arm-right::after { --arm-right: var(--bar); }
+.gem.arm-down::after { --arm-down: var(--bar); }
+.gem.arm-left::after { --arm-left: var(--bar); }
 
 @keyframes lineGlow {
-  0%, 100% { opacity: 0.9; box-shadow: 0 0 12px rgba(255, 255, 255, 0.8); }
-  50% { opacity: 1; box-shadow: 0 0 20px rgba(255, 255, 255, 1); }
+  0%, 100% { opacity: 0.9; filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.8)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 9px rgba(255, 255, 255, 1)); }
 }
 
 .gem.special-rainbow {
@@ -774,31 +764,29 @@ button {
   100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
 }
 
-.line-effect {
+.beam-effect {
   position: absolute;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
   z-index: 50;
-  animation: lineWave 0.4s ease-out forwards;
-  will-change: opacity;
+  will-change: transform, opacity;
+  animation: beamSweepX 0.45s var(--ease) forwards;
 }
 
-.line-effect.horizontal {
-  height: var(--cell-size, 48px);
-  width: 100%;
-  left: 0;
+.beam-effect.up { background: linear-gradient(0deg, rgba(255, 255, 255, 0.85), transparent); transform-origin: 50% 100%; animation-name: beamSweepY; }
+.beam-effect.down { background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), transparent); transform-origin: 50% 0; animation-name: beamSweepY; }
+.beam-effect.left { background: linear-gradient(270deg, rgba(255, 255, 255, 0.85), transparent); transform-origin: 100% 50%; }
+.beam-effect.right { background: linear-gradient(90deg, rgba(255, 255, 255, 0.85), transparent); transform-origin: 0 50%; }
+
+@keyframes beamSweepX {
+  0% { transform: scaleX(0); opacity: 1; }
+  40% { transform: scaleX(1); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 0; }
 }
 
-.line-effect.vertical {
-  width: var(--cell-size, 48px);
-  height: 100%;
-  top: 0;
-  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.8), transparent);
-}
-
-@keyframes lineWave {
-  0% { opacity: 1; }
-  100% { opacity: 0; }
+@keyframes beamSweepY {
+  0% { transform: scaleY(0); opacity: 1; }
+  40% { transform: scaleY(1); opacity: 1; }
+  100% { transform: scaleY(1); opacity: 0; }
 }
 
 /* 8. New-game transition -------------------------------------------------- */

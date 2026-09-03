@@ -2,6 +2,7 @@ import './styles.css';
 import {
   Engine,
   SPECIAL,
+  ARM,
   cloneBoard,
   type Board,
   type Frame,
@@ -362,7 +363,12 @@ function renderBoard(board: Board): void {
       if (cell.special === SPECIAL.BOMB) {
         gemEl.classList.add('special-bomb');
       } else if (cell.special === SPECIAL.LINE) {
-        gemEl.classList.add('special-line', cell.direction || 'horizontal');
+        gemEl.classList.add('special-line');
+        const arms = cell.arms ?? 0;
+        if (arms & ARM.UP) gemEl.classList.add('arm-up');
+        if (arms & ARM.RIGHT) gemEl.classList.add('arm-right');
+        if (arms & ARM.DOWN) gemEl.classList.add('arm-down');
+        if (arms & ARM.LEFT) gemEl.classList.add('arm-left');
       } else if (cell.special === SPECIAL.RAINBOW) {
         gemEl.classList.add('special-rainbow');
       }
@@ -419,29 +425,38 @@ function showExplosionEffect(r: number, c: number): void {
   setTimeout(() => effect.remove(), 500);
 }
 
-function showLineEffect(effect: Effect): void {
-  if (effect.kind !== 'line') return;
-  const el = document.createElement('div');
-  el.className = `line-effect ${effect.direction}`;
+// A beam runs from the firing gem's cell to the board edge and is swept outward by CSS.
+function showBeamEffect(effect: Effect): void {
+  if (effect.kind !== 'beam') return;
+  const center = cellCenter(effect.from.r, effect.from.c);
+  if (!center) return;
   const boardRect = boardEl.getBoundingClientRect();
-
-  if (effect.direction === 'horizontal' && effect.row !== undefined) {
-    const cell = cells[effect.row * config.cols];
-    if (cell) el.style.top = `${cell.getBoundingClientRect().top - boardRect.top}px`;
+  const cellSize = parseFloat(getComputedStyle(boardEl).getPropertyValue('--cell-size')) || 48;
+  const half = cellSize / 2;
+  const el = document.createElement('div');
+  el.className = `beam-effect ${effect.dir}`;
+  switch (effect.dir) {
+    case 'up':
+      el.style.cssText = `left:${center.x - half}px;top:0;width:${cellSize}px;height:${center.y}px;`;
+      break;
+    case 'down':
+      el.style.cssText = `left:${center.x - half}px;top:${center.y}px;width:${cellSize}px;height:${boardRect.height - center.y}px;`;
+      break;
+    case 'left':
+      el.style.cssText = `left:0;top:${center.y - half}px;width:${center.x}px;height:${cellSize}px;`;
+      break;
+    case 'right':
+      el.style.cssText = `left:${center.x}px;top:${center.y - half}px;width:${boardRect.width - center.x}px;height:${cellSize}px;`;
+      break;
   }
-  if (effect.direction === 'vertical' && effect.col !== undefined) {
-    const cell = cells[effect.col];
-    if (cell) el.style.left = `${cell.getBoundingClientRect().left - boardRect.left}px`;
-  }
-
   boardEl.appendChild(el);
-  setTimeout(() => el.remove(), 400);
+  setTimeout(() => el.remove(), 450);
 }
 
 function showEffects(effects: Effect[]): void {
   for (const effect of effects) {
     if (effect.kind === 'explosion') showExplosionEffect(effect.r, effect.c);
-    else showLineEffect(effect);
+    else showBeamEffect(effect);
   }
 }
 
