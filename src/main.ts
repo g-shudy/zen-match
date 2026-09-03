@@ -14,6 +14,7 @@ import {
 } from './engine/index';
 import {
   LIMITS,
+  formatGrid,
   parseSettings,
   serializeSettings,
   resolveSettings,
@@ -87,9 +88,8 @@ persistSettings();
 
 // Live board configuration. `settings` may run ahead of this until New Game.
 const config = {
-  gridSize: settings.gridSize,
-  rows: settings.gridSize,
-  cols: settings.gridSize,
+  rows: settings.rows,
+  cols: settings.cols,
   gemTypes: settings.gemTypes,
   seed: hasValidSeed ? parsedSeed : Date.now(),
   seedLocked: hasValidSeed,
@@ -848,8 +848,8 @@ function syncUrl(): void {
   const url = new URL(window.location.toString());
   if (config.gemTypes === LIMITS.gems.default) url.searchParams.delete('gems');
   else url.searchParams.set('gems', String(config.gemTypes));
-  if (config.gridSize === LIMITS.grid.default) url.searchParams.delete('grid');
-  else url.searchParams.set('grid', String(config.gridSize));
+  if (config.cols === LIMITS.grid.default && config.rows === LIMITS.grid.default) url.searchParams.delete('grid');
+  else url.searchParams.set('grid', formatGrid(config.cols, config.rows));
   history.replaceState({}, '', url);
 }
 
@@ -894,10 +894,9 @@ async function startNewGame(options: { transition?: boolean } = {}): Promise<voi
   if (settings.gemTypes !== config.gemTypes) {
     config.gemTypes = settings.gemTypes;
   }
-  if (settings.gridSize !== config.gridSize) {
-    config.gridSize = settings.gridSize;
-    config.rows = settings.gridSize;
-    config.cols = settings.gridSize;
+  if (settings.rows !== config.rows || settings.cols !== config.cols) {
+    config.rows = settings.rows;
+    config.cols = settings.cols;
     needsGridRebuild = true;
   }
   syncUrl();
@@ -1153,7 +1152,7 @@ function wireSheet(sheet: HTMLDialogElement, onDismiss?: () => void): void {
 const SIZE_PRESETS = [6, 8, 10, 12];
 const COLOR_PRESETS = [2, 3, 4, 5, 6, 7];
 
-const pending = { gridSize: settings.gridSize, gemTypes: settings.gemTypes };
+const pending = { cols: settings.cols, rows: settings.rows, gemTypes: settings.gemTypes };
 
 function renderSegments(container: HTMLElement, name: string, presets: number[], current: number, label: (v: number) => string): void {
   // A value set from the URL that is not a preset still gets a segment so the
@@ -1165,26 +1164,27 @@ function renderSegments(container: HTMLElement, name: string, presets: number[],
 }
 
 function syncSettingsUI(): void {
-  renderSegments(sizeSeg, 'size', SIZE_PRESETS, pending.gridSize, v => `${v}×${v}`);
+  renderSegments(sizeSeg, 'size', SIZE_PRESETS, pending.cols, v => `${v}×${v}`);
   renderSegments(colorsSeg, 'colors', COLOR_PRESETS, pending.gemTypes, v => String(v));
   updateApplyState();
   updateStats();
 }
 
 function updateApplyState(): void {
-  const dirty = pending.gridSize !== config.gridSize || pending.gemTypes !== config.gemTypes;
+  const dirty = pending.cols !== config.cols || pending.rows !== config.rows || pending.gemTypes !== config.gemTypes;
   settingsDone.textContent = dirty ? 'Start new game' : 'Done';
   settingsDone.classList.toggle('btn-primary', dirty);
 }
 
 function revertPending(): void {
-  pending.gridSize = config.gridSize;
+  pending.cols = config.cols;
+  pending.rows = config.rows;
   pending.gemTypes = config.gemTypes;
 }
 
 sizeSeg.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
-  pending.gridSize = Number(input.value);
+  pending.cols = pending.rows = Number(input.value);
   updateApplyState();
 });
 
@@ -1205,10 +1205,11 @@ for (const input of paletteInputs) {
 }
 
 settingsDone.addEventListener('click', () => {
-  const dirty = pending.gridSize !== config.gridSize || pending.gemTypes !== config.gemTypes;
+  const dirty = pending.cols !== config.cols || pending.rows !== config.rows || pending.gemTypes !== config.gemTypes;
   closeSheet(settingsSheet);
   if (!dirty) return;
-  settings.gridSize = pending.gridSize;
+  settings.cols = pending.cols;
+  settings.rows = pending.rows;
   settings.gemTypes = pending.gemTypes;
   persistSettings();
   void startNewGame();
@@ -1279,7 +1280,8 @@ newGameBtn.addEventListener('keyup', event => {
 // change is applied first, so this button and the footer never disagree. It is
 // the no-hold path for anyone who cannot hold New Game.
 settingsNewGame.addEventListener('click', () => {
-  settings.gridSize = pending.gridSize;
+  settings.cols = pending.cols;
+  settings.rows = pending.rows;
   settings.gemTypes = pending.gemTypes;
   persistSettings();
   closeSheet(settingsSheet);

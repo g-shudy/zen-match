@@ -5,6 +5,8 @@ import {
   parseSettings,
   serializeSettings,
   resolveSettings,
+  parseGrid,
+  formatGrid,
   serializeGame,
   parseSavedGame
 } from '../dist/storage.js';
@@ -23,14 +25,17 @@ test('parseSettings falls back to defaults for missing or malformed input', () =
   assert.deepEqual(parseSettings('[1,2,3]'), DEFAULT_SETTINGS);
 });
 
-test('parseSettings clamps ranges and rejects unknown palettes', () => {
-  const s = parseSettings('{"gridSize":"12","gemTypes":99,"palette":"nope"}');
-  assert.deepEqual(s, { gridSize: 12, gemTypes: 10, palette: 'default' });
+test('parseSettings clamps ranges, rejects unknown palettes, and migrates gridSize', () => {
+  const s = parseSettings('{"cols":"12","rows":18,"gemTypes":99,"palette":"nope","turns":2}');
+  assert.deepEqual(s, { cols: 12, rows: 18, gemTypes: 10, palette: 'default', turns: 2 });
 
-  const low = parseSettings('{"gridSize":1,"gemTypes":-4,"palette":"highcontrast"}');
-  assert.deepEqual(low, { gridSize: 4, gemTypes: 2, palette: 'highcontrast' });
+  const low = parseSettings('{"cols":1,"rows":99,"gemTypes":-4,"palette":"highcontrast","turns":7}');
+  assert.deepEqual(low, { cols: 4, rows: 40, gemTypes: 2, palette: 'highcontrast', turns: 3 });
 
-  const nan = parseSettings('{"gridSize":"abc","gemTypes":null}');
+  const legacy = parseSettings('{"gridSize":12,"gemTypes":6,"palette":"redgreen"}');
+  assert.deepEqual(legacy, { cols: 12, rows: 12, gemTypes: 6, palette: 'redgreen', turns: 0 });
+
+  const nan = parseSettings('{"cols":"abc","gemTypes":null}');
   assert.deepEqual(nan, DEFAULT_SETTINGS);
 });
 
@@ -42,20 +47,42 @@ test('parseSettings migrates a legacy palette key only when the blob has none', 
 });
 
 test('settings survive a serialize/parse round trip', () => {
-  const s = { gridSize: 10, gemTypes: 6, palette: 'redgreen' };
+  const s = { cols: 10, rows: 15, gemTypes: 6, palette: 'redgreen', turns: 1 };
   assert.deepEqual(parseSettings(serializeSettings(s)), s);
 });
 
+test('parseGrid accepts a side or WxH, clamps, and rejects anything else', () => {
+  assert.deepEqual(parseGrid('8'), { cols: 8, rows: 8 });
+  assert.deepEqual(parseGrid('8x12'), { cols: 8, rows: 12 });
+  assert.deepEqual(parseGrid(' 12X8 '), { cols: 12, rows: 8 });
+  assert.deepEqual(parseGrid('3x99'), { cols: 4, rows: 40 });
+  assert.equal(parseGrid('8x'), null);
+  assert.equal(parseGrid('x8'), null);
+  assert.equal(parseGrid('abc'), null);
+  assert.equal(parseGrid('8x12x3'), null);
+  assert.equal(parseGrid(''), null);
+  assert.equal(parseGrid(null), null);
+});
+
+test('formatGrid writes a bare side for squares and WxH otherwise', () => {
+  assert.equal(formatGrid(8, 8), '8');
+  assert.equal(formatGrid(8, 12), '8x12');
+});
+
 test('resolveSettings lets valid URL params override stored board values', () => {
-  const stored = { gridSize: 8, gemTypes: 5, palette: 'highcontrast' };
+  const stored = { cols: 8, rows: 8, gemTypes: 5, palette: 'highcontrast', turns: 2 };
   assert.deepEqual(
-    resolveSettings(new URLSearchParams('grid=10&gems=7'), stored),
-    { gridSize: 10, gemTypes: 7, palette: 'highcontrast' }
+    resolveSettings(new URLSearchParams('grid=10x15&gems=7'), stored),
+    { cols: 10, rows: 15, gemTypes: 7, palette: 'highcontrast', turns: 2 }
   );
-  // Non-numeric values are ignored, out-of-range values are clamped.
   assert.deepEqual(
-    resolveSettings(new URLSearchParams('grid=abc&gems=99'), stored),
-    { gridSize: 8, gemTypes: 10, palette: 'highcontrast' }
+    resolveSettings(new URLSearchParams('grid=12'), stored),
+    { cols: 12, rows: 12, gemTypes: 5, palette: 'highcontrast', turns: 2 }
+  );
+  // Malformed grid is ignored, out-of-range gems are clamped, turns never come from the URL.
+  assert.deepEqual(
+    resolveSettings(new URLSearchParams('grid=abc&gems=99&turns=1'), stored),
+    { cols: 8, rows: 8, gemTypes: 10, palette: 'highcontrast', turns: 2 }
   );
   assert.deepEqual(resolveSettings(new URLSearchParams(''), stored), stored);
 });

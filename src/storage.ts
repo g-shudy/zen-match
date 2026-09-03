@@ -10,20 +10,25 @@ export const PALETTES = ['default', 'redgreen', 'highcontrast'] as const;
 export type PaletteId = (typeof PALETTES)[number];
 
 export const LIMITS = {
-  grid: { min: 4, max: 16, default: 8 },
-  gems: { min: 2, max: 10, default: 5 }
+  grid: { min: 4, max: 40, default: 8 }, // per side
+  gems: { min: 2, max: 10, default: 5 },
+  turns: { min: 0, max: 3 }
 } as const;
 
 export interface Settings {
-  gridSize: number;
+  cols: number; // across the device's short side
+  rows: number; // down its long side
   gemTypes: number;
   palette: PaletteId;
+  turns: number; // manual quarter turns clockwise, 0..3
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  gridSize: LIMITS.grid.default,
+  cols: LIMITS.grid.default,
+  rows: LIMITS.grid.default,
   gemTypes: LIMITS.gems.default,
-  palette: 'default'
+  palette: 'default',
+  turns: 0
 };
 
 // Math.max(lo, Math.min(hi, NaN)) is NaN, so a bare clamp lets non-numeric input
@@ -54,8 +59,23 @@ function parseJson(json: string | null | undefined): unknown {
   }
 }
 
+// "8" is a square, "8x12" is cols by rows. Anything else is not a grid.
+export function parseGrid(value: unknown): { cols: number; rows: number } | null {
+  if (typeof value !== 'string') return null;
+  const m = /^\s*(\d+)(?:\s*[xX]\s*(\d+))?\s*$/.exec(value);
+  if (!m) return null;
+  const cols = clampInt(m[1], LIMITS.grid.min, LIMITS.grid.max, LIMITS.grid.default);
+  const rows = m[2] === undefined ? cols : clampInt(m[2], LIMITS.grid.min, LIMITS.grid.max, LIMITS.grid.default);
+  return { cols, rows };
+}
+
+export function formatGrid(cols: number, rows: number): string {
+  return cols === rows ? String(cols) : `${cols}x${rows}`;
+}
+
 // `legacyPalette` is the value of the pre-2.0 standalone palette key; it only
-// applies when the settings blob carries no palette of its own.
+// applies when the settings blob carries no palette of its own. A pre-2.3 blob
+// carries `gridSize`, which becomes a square of that side.
 export function parseSettings(json: string | null | undefined, legacyPalette?: string | null): Settings {
   const raw = asRecord(parseJson(json)) ?? {};
   const palette = isPalette(raw.palette)
@@ -63,10 +83,13 @@ export function parseSettings(json: string | null | undefined, legacyPalette?: s
     : isPalette(legacyPalette)
       ? legacyPalette
       : DEFAULT_SETTINGS.palette;
+  const legacySide = clampInt(raw.gridSize, LIMITS.grid.min, LIMITS.grid.max, LIMITS.grid.default);
   return {
-    gridSize: clampInt(raw.gridSize, LIMITS.grid.min, LIMITS.grid.max, DEFAULT_SETTINGS.gridSize),
+    cols: clampInt(raw.cols, LIMITS.grid.min, LIMITS.grid.max, legacySide),
+    rows: clampInt(raw.rows, LIMITS.grid.min, LIMITS.grid.max, legacySide),
     gemTypes: clampInt(raw.gemTypes, LIMITS.gems.min, LIMITS.gems.max, DEFAULT_SETTINGS.gemTypes),
-    palette
+    palette,
+    turns: clampInt(raw.turns, LIMITS.turns.min, LIMITS.turns.max, DEFAULT_SETTINGS.turns)
   };
 }
 
@@ -75,12 +98,16 @@ export function serializeSettings(settings: Settings): string {
 }
 
 // URL parameters win over stored values for the board shape so links stay
-// shareable; the palette is a personal preference and never comes from the URL.
+// shareable; the palette and the turn count are personal and never come from
+// the URL.
 export function resolveSettings(params: URLSearchParams, stored: Settings): Settings {
+  const grid = parseGrid(params.get('grid'));
   return {
-    gridSize: clampInt(params.get('grid'), LIMITS.grid.min, LIMITS.grid.max, stored.gridSize),
+    cols: grid ? grid.cols : stored.cols,
+    rows: grid ? grid.rows : stored.rows,
     gemTypes: clampInt(params.get('gems'), LIMITS.gems.min, LIMITS.gems.max, stored.gemTypes),
-    palette: stored.palette
+    palette: stored.palette,
+    turns: stored.turns
   };
 }
 
