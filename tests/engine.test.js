@@ -11,7 +11,9 @@ import {
   beamCells,
   hasValidMoves,
   findValidMove,
-  findMatches
+  findMatches,
+  dropGems,
+  fillGems
 } from '../dist/engine.js';
 
 function makeCell(type, special = SPECIAL.NONE, arms = null) {
@@ -346,7 +348,7 @@ test('An abandoned move leaves the board hole-free where the last pulled wave le
   const board = engine.state.board;
   assert.ok(board.every(row => row.every(cell => cell !== null)), 'no holes after a fill frame');
   const again = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
-  assert.equal(typeof again.moveValid, 'boolean', 'the engine judges the next move against the abandoned board');
+  assert.equal(again.moveValid, true, 'the engine judges the next move against the abandoned board');
 });
 
 test('Refill does not manufacture immediate matches', () => {
@@ -758,4 +760,69 @@ test('An abandoned move cannot touch the game that replaced it', () => {
 
   assert.deepEqual(engine.state.board, planted, 'the abandoned move must only ever touch its own state');
   assert.equal(engine.state.lastSwapPos, null);
+});
+
+// --- Gravity ----------------------------------------------------------------
+
+// A 3x3 with one gem left in the middle line, so one gem falls and two enter.
+function gravityFixture(gravity) {
+  const board = Array.from({ length: 3 }, () => Array.from({ length: 3 }, () => makeCell(1)));
+  const keep = { down: { r: 0, c: 1 }, up: { r: 2, c: 1 }, right: { r: 1, c: 0 }, left: { r: 1, c: 2 } }[gravity];
+  const line = gravity === 'down' || gravity === 'up' ? [{ r: 0, c: 1 }, { r: 1, c: 1 }, { r: 2, c: 1 }] : [{ r: 1, c: 0 }, { r: 1, c: 1 }, { r: 1, c: 2 }];
+  for (const pos of line) board[pos.r][pos.c] = null;
+  board[keep.r][keep.c] = makeCell(2);
+  return { board, keep };
+}
+
+test('dropGems compacts each line toward the gravity edge in every direction', () => {
+  const landing = { down: { r: 2, c: 1 }, up: { r: 0, c: 1 }, right: { r: 1, c: 2 }, left: { r: 1, c: 0 } };
+  for (const gravity of ['down', 'up', 'right', 'left']) {
+    const { board, keep } = gravityFixture(gravity);
+    const moves = dropGems(board, 3, 3, gravity);
+    assert.deepEqual(moves, [{ from: keep, to: landing[gravity], type: 2 }], gravity);
+    assert.equal(board[landing[gravity].r][landing[gravity].c].type, 2, `${gravity}: gem landed`);
+    assert.equal(board[keep.r][keep.c], null, `${gravity}: origin emptied`);
+  }
+});
+
+test('fillGems enters new gems from the edge opposite gravity, each travelling the full gap', () => {
+  const beyond = {
+    down: m => m.from.r < 0 && m.from.c === m.to.c && m.to.r - m.from.r === 2,
+    up: m => m.from.r > 2 && m.from.c === m.to.c && m.from.r - m.to.r === 2,
+    right: m => m.from.c < 0 && m.from.r === m.to.r && m.to.c - m.from.c === 2,
+    left: m => m.from.c > 2 && m.from.r === m.to.r && m.from.c - m.to.c === 2
+  };
+  for (const gravity of ['down', 'up', 'right', 'left']) {
+    const { board } = gravityFixture(gravity);
+    dropGems(board, 3, 3, gravity);
+    const moves = fillGems(board, 3, 3, 4, new RNG(1), gravity);
+    assert.equal(moves.length, 2, gravity);
+    assert.ok(moves.every(beyond[gravity]), `${gravity}: ${JSON.stringify(moves)}`);
+    assert.ok(board.every(row => row.every(cell => cell !== null)), `${gravity}: board full`);
+  }
+});
+
+test('Gravity is read at the start of each wave, so a turn mid-cascade changes where refills come from', () => {
+  let proved = false;
+  for (let seed = 0; seed < 20 && !proved; seed++) {
+    const engine = new Engine({ rows: 8, cols: 8, gemTypes: 2, seed });
+    engine.init();
+    const m = engine.findValidMove();
+    if (!m) continue;
+    const result = engine.swap({ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
+    let fills = 0;
+    for (const frame of result.frames) {
+      if (frame.kind !== 'fill') continue;
+      fills++;
+      if (fills === 1) {
+        assert.ok(frame.moves.every(mv => mv.from.r < 0), 'the first fill comes from the top under down');
+        engine.setGravity('up');
+      } else {
+        assert.ok(frame.moves.every(mv => mv.from.r >= 8), 'after the turn the next fill comes from the bottom');
+        proved = true;
+        break;
+      }
+    }
+  }
+  assert.ok(proved, 'a two-colour move should cascade at least two waves within 20 seeds');
 });

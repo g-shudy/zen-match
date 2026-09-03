@@ -37,6 +37,18 @@ const ARM_STEPS: ReadonlyArray<{ arm: number; dr: number; dc: number; dir: BeamD
   { arm: ARM.LEFT, dr: 0, dc: -1, dir: 'left' }
 ];
 
+// The direction gems fall, in board coordinates. The page sets it from the
+// device orientation and the Turn control; the engine reads it at the start of
+// every wave, so a turn mid-cascade changes where the next refill comes from.
+export type Gravity = 'down' | 'up' | 'left' | 'right';
+
+const GRAVITY_STEP: Record<Gravity, { dr: number; dc: number }> = {
+  down: { dr: 1, dc: 0 },
+  up: { dr: -1, dc: 0 },
+  right: { dr: 0, dc: 1 },
+  left: { dr: 0, dc: -1 }
+};
+
 export class RNG {
   private state: number;
 
@@ -60,6 +72,7 @@ export interface EngineConfig {
   cols: number;
   gemTypes: number;
   seed?: number;
+  gravity?: Gravity;
 }
 
 export interface EngineState {
@@ -69,6 +82,7 @@ export interface EngineState {
   board: Board;
   rng: RNG;
   lastSwapPos: { r1: number; c1: number; r2: number; c2: number } | null;
+  gravity: Gravity;
 }
 
 export type RemovalAnim = 'matched' | 'exploding' | 'line-cleared' | 'rainbow-cleared';
@@ -258,7 +272,8 @@ export class Engine {
       gemTypes: config.gemTypes,
       board: createEmptyBoard(config.rows, config.cols),
       rng,
-      lastSwapPos: null
+      lastSwapPos: null,
+      gravity: config.gravity ?? 'down'
     };
   }
 
@@ -268,9 +283,10 @@ export class Engine {
     const cols = typeof config.cols === 'number' ? config.cols : prev.cols;
     const gemTypes = typeof config.gemTypes === 'number' ? config.gemTypes : prev.gemTypes;
     const rng = typeof config.seed === 'number' ? new RNG(config.seed) : prev.rng;
+    const gravity = config.gravity ?? prev.gravity;
     // A fresh object: a generator left over from an abandoned move keeps the old
     // state and can never touch the board of the game that replaced it.
-    this.state = { rows, cols, gemTypes, board: createEmptyBoard(rows, cols), rng, lastSwapPos: null };
+    this.state = { rows, cols, gemTypes, board: createEmptyBoard(rows, cols), rng, lastSwapPos: null, gravity };
   }
 
   init(): Board {
@@ -309,6 +325,10 @@ export class Engine {
 
   setBoard(board: Board): void {
     this.state.board = cloneBoard(board);
+  }
+
+  setGravity(gravity: Gravity): void {
+    this.state.gravity = gravity;
   }
 
   swap(pos1: Pos, pos2: Pos): MoveResult {
@@ -548,10 +568,10 @@ export class Engine {
       removePositions(board, toRemove);
       yield { kind: 'board', board: cloneBoard(board) };
 
-      const dropMoves = dropGems(board, rows, cols);
+      const dropMoves = dropGems(board, rows, cols, state.gravity);
       if (dropMoves.length > 0) yield { kind: 'drop', board: cloneBoard(board), moves: dropMoves };
 
-      const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng);
+      const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng, state.gravity);
       if (fillMoves.length > 0) yield { kind: 'fill', board: cloneBoard(board), moves: fillMoves };
     } else if (gem1Special === SPECIAL.RAINBOW || gem2Special === SPECIAL.RAINBOW) {
       const gem1IsRainbow = gem1Special === SPECIAL.RAINBOW;
@@ -608,10 +628,10 @@ export class Engine {
       removePositions(board, toRemove);
       yield { kind: 'board', board: cloneBoard(board) };
 
-      const dropMoves = dropGems(board, rows, cols);
+      const dropMoves = dropGems(board, rows, cols, state.gravity);
       if (dropMoves.length > 0) yield { kind: 'drop', board: cloneBoard(board), moves: dropMoves };
 
-      const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng);
+      const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng, state.gravity);
       if (fillMoves.length > 0) yield { kind: 'fill', board: cloneBoard(board), moves: fillMoves };
     }
 
@@ -1045,10 +1065,10 @@ function* cascadeWaves(state: EngineState, tally: Tally): Generator<Frame, void,
 
     yield { kind: 'board', board: cloneBoard(board), newSpecials: newSpecialPositions.length > 0 ? newSpecialPositions : undefined };
 
-    const dropMoves = dropGems(board, rows, cols);
+    const dropMoves = dropGems(board, rows, cols, state.gravity);
     if (dropMoves.length > 0) yield { kind: 'drop', board: cloneBoard(board), moves: dropMoves };
 
-    const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng);
+    const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng, state.gravity);
     if (fillMoves.length > 0) yield { kind: 'fill', board: cloneBoard(board), moves: fillMoves };
 
     matches = findMatches(board, rows, cols);
@@ -1066,48 +1086,69 @@ function* cascadeWaves(state: EngineState, tally: Tally): Generator<Frame, void,
   }
 }
 
-function dropGems(board: Board, rows: number, cols: number): GemMove[] {
+// The lines gems fall along, each listed from the landing edge inward: index 0 is
+// where the first gem comes to rest and the last entry touches the edge new gems
+// enter from. Under 'down' this is column by column, bottom row first, which is
+// exactly the order the old code used, so 'down' frames are unchanged.
+function fallLines(rows: number, cols: number, gravity: Gravity): Pos[][] {
+  const lines: Pos[][] = [];
+  if (gravity === 'down' || gravity === 'up') {
+    for (let c = 0; c < cols; c++) {
+      const line: Pos[] = [];
+      for (let i = 0; i < rows; i++) line.push({ r: gravity === 'down' ? rows - 1 - i : i, c });
+      lines.push(line);
+    }
+  } else {
+    for (let r = 0; r < rows; r++) {
+      const line: Pos[] = [];
+      for (let i = 0; i < cols; i++) line.push({ r, c: gravity === 'right' ? cols - 1 - i : i });
+      lines.push(line);
+    }
+  }
+  return lines;
+}
+
+export function dropGems(board: Board, rows: number, cols: number, gravity: Gravity): GemMove[] {
   const moves: GemMove[] = [];
 
-  for (let c = 0; c < cols; c++) {
-    let writePos = rows - 1;
-    for (let r = rows - 1; r >= 0; r--) {
-      if (board[r][c]) {
-        if (writePos !== r) {
-          const cell = board[r][c]!;
-          board[writePos][c] = cell;
-          board[r][c] = null;
-          moves.push({ from: { r, c }, to: { r: writePos, c }, type: cell.type });
-        }
-        writePos--;
+  for (const line of fallLines(rows, cols, gravity)) {
+    let write = 0;
+    for (let i = 0; i < line.length; i++) {
+      const from = line[i];
+      const cell = board[from.r][from.c];
+      if (!cell) continue;
+      if (write !== i) {
+        const to = line[write];
+        board[to.r][to.c] = cell;
+        board[from.r][from.c] = null;
+        moves.push({ from, to, type: cell.type });
       }
+      write++;
     }
   }
 
   return moves;
 }
 
-function fillGems(board: Board, rows: number, cols: number, gemTypes: number, rng: RNG): GemMove[] {
+export function fillGems(board: Board, rows: number, cols: number, gemTypes: number, rng: RNG, gravity: Gravity): GemMove[] {
   const moves: GemMove[] = [];
+  const step = GRAVITY_STEP[gravity];
 
-  for (let c = 0; c < cols; c++) {
-    const emptyRows: number[] = [];
-    for (let r = 0; r < rows; r++) {
-      if (!board[r][c]) emptyRows.push(r);
-    }
-
-    for (let i = 0; i < emptyRows.length; i++) {
-      const r = emptyRows[i];
+  for (const line of fallLines(rows, cols, gravity)) {
+    const empties = line.filter(pos => !board[pos.r][pos.c]);
+    const n = empties.length;
+    // Fill from the entry edge inward, the order the old code used, so the
+    // match-avoidance sees the neighbours it expects and the RNG draws match.
+    for (let k = n - 1; k >= 0; k--) {
+      const pos = empties[k];
       // Refill with the same match-avoidance the initial board uses. Without this
       // the engine builds a clean board then refills it carelessly, and below ~4
       // gem types the refill manufactures matches faster than they clear.
-      const type = pickNonMatchingType(board, r, c, gemTypes, rng);
-      board[r][c] = {
-        type,
-        special: SPECIAL.NONE,
-        arms: null
-      };
-      moves.push({ from: { r: i - emptyRows.length, c }, to: { r, c }, type });
+      const type = pickNonMatchingType(board, pos.r, pos.c, gemTypes, rng);
+      board[pos.r][pos.c] = { type, special: SPECIAL.NONE, arms: null };
+      // Every new gem starts n cells beyond the entry edge, so all of them travel
+      // the same distance into place.
+      moves.push({ from: { r: pos.r - step.dr * n, c: pos.c - step.dc * n }, to: pos, type });
     }
   }
 
