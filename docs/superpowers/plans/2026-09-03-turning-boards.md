@@ -705,7 +705,30 @@ In `index.html`:
 ```
 
 In `src/styles.css`:
-1. Change `.board { grid-area: board; position: relative; ... }` so the frame takes the grid area and the board sits inside it, rotated about its centre:
+1. Next to the existing `@property --hold-angle`, register the properties a turn eases:
+
+```css
+/* Registered so a turn can ease the cell size along with the rotation. */
+@property --cell-size {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 48px;
+}
+
+@property --gem-size {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 40px;
+}
+
+@property --board-scale {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
+```
+
+2. Change `.board { grid-area: board; position: relative; ... }` so the frame takes the grid area and the board sits inside it, rotated about its centre. A turn is one motion: the frame's footprint, the cell and gem sizes, and the rotation all ease on the same `--turn-ms` curve, and the board dips at mid-turn so its corners do not sweep the chrome:
 
 ```css
 /* The frame is the board's footprint on screen (swapped when the board is turned
@@ -713,6 +736,13 @@ In `src/styles.css`:
 .board-frame {
   grid-area: board;
   position: relative;
+  /* The lift rides here, not on .board: the board's transform is under a
+     transition, which interpolates between its two end matrices and so never
+     sees --board-scale change mid-flight. The frame has no transform
+     transition, and the board is centred in it, so scaling the frame lifts the
+     board about the same centre. */
+  transform: scale(var(--board-scale, 1));
+  transition: width var(--turn-ms, 600ms) var(--ease), height var(--turn-ms, 600ms) var(--ease);
 }
 
 .board {
@@ -720,13 +750,28 @@ In `src/styles.css`:
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%) rotate(var(--board-rotation, 0deg));
-  transition: box-shadow 1.2s var(--ease), transform var(--turn-ms, 600ms) var(--ease);
+  transition:
+    box-shadow 1.2s var(--ease),
+    transform var(--turn-ms, 600ms) var(--ease),
+    --cell-size var(--turn-ms, 600ms) var(--ease),
+    --gem-size var(--turn-ms, 600ms) var(--ease);
   /* (keep every other declaration of the existing .board rule) */
+}
+
+/* A turn lifts the board a little so its corners do not sweep over the chrome. */
+.board-frame.turning {
+  animation: turnLift var(--turn-ms, 600ms) var(--ease);
+}
+
+@keyframes turnLift {
+  0%, 100% { --board-scale: 1; }
+  50% { --board-scale: 0.82; }
 }
 ```
 
    Remove `grid-area: board;` and the old `position: relative;` and `transition: box-shadow 1.2s var(--ease);` from `.board` (the new declarations above replace them).
-2. In the reduced-motion block add `.board { transition: box-shadow 1.2s var(--ease); }` (no transform transition).
+3. Where `body { ... overflow: hidden; ... }` is set, add `html { overflow: hidden; }` so the document can never scroll during a turn.
+4. In the reduced-motion block add `.board { transition: box-shadow 1.2s var(--ease); }` (no transform transition), `.board-frame { transition: none; }` and `.board-frame.turning { animation: none; }`.
 
 - [ ] **Step 2: Pose state, sizing and the Turn control**
 
@@ -740,7 +785,7 @@ In `src/main.ts`:
 // Board geometry in board-local pixels, refreshed by updateBoardSizing. Every
 // effect and animation offset is computed from these, never from client rects:
 // the board element is rotated, so a screen rect would be in the wrong frame.
-const layout = { cell: 48, gap: 4, pad: 17 };
+const layout = { cell: 48, gap: 4, pad: 16 };
 
 function updateBoardSizing(): void {
   const narrow = window.innerWidth <= 480;
@@ -772,7 +817,7 @@ function updateBoardSizing(): void {
 
   layout.cell = cellSize;
   layout.gap = gap;
-  layout.pad = boardPadding / 2;
+  layout.pad = narrow ? 6 : 16; // effects resolve from the padding box, not the border box
 
   boardEl.style.setProperty('--grid-cols', String(config.cols));
   boardEl.style.setProperty('--cell-size', `${cellSize}px`);
@@ -792,27 +837,40 @@ function updateBoardSizing(): void {
 
 const landscapeQuery = window.matchMedia('(orientation: landscape)');
 
+const orientationApi = typeof window.screen.orientation?.angle === 'number' ? window.screen.orientation : null;
+
 function deviceAngle(): number {
-  const angle = window.screen.orientation?.angle;
-  if (typeof angle === 'number') return angle;
-  return landscapeQuery.matches ? 90 : 0;
+  return orientationApi ? orientationApi.angle : landscapeQuery.matches ? 90 : 0;
 }
 
 const pose: { rotation: Rotation; visualRotation: number } = { rotation: 0, visualRotation: 0 };
 
-function applyPose(): void {
+function applyPose({ animate = true }: { animate?: boolean } = {}): void {
   const next = boardPose(deviceAngle(), settings.turns);
   // Keep the CSS angle continuous so a turn always animates the short way round.
   let delta = next.rotation - pose.rotation;
   if (delta > 180) delta -= 360;
   if (delta < -180) delta += 360;
+  const turned = delta !== 0;
   pose.visualRotation += delta;
   pose.rotation = next.rotation;
+
+  const turnMs = animate && !reducedMotion() ? config.timing.turn : 0;
+  boardFrameEl.style.setProperty('--turn-ms', `${turnMs}ms`);
+  if (turnMs > 0 && turned) {
+    boardFrameEl.classList.add('turning');
+    window.setTimeout(() => boardFrameEl.classList.remove('turning'), turnMs);
+  }
   boardEl.style.setProperty('--board-rotation', `${pose.visualRotation}deg`);
-  boardEl.style.setProperty('--turn-ms', `${config.timing.turn}ms`);
   boardEl.dataset.rotation = String(pose.rotation);
   engine.setGravity(next.gravity);
   updateBoardSizing();
+  if (turnMs === 0) {
+    // Commit the instant change before restoring the duration, or the next
+    // style recalc would see the normal duration and animate anyway.
+    void boardEl.offsetHeight;
+    boardFrameEl.style.setProperty('--turn-ms', `${config.timing.turn}ms`);
+  }
 }
 
 function turnBoard(): void {
@@ -821,11 +879,8 @@ function turnBoard(): void {
   applyPose();
 }
 
-if (window.screen.orientation?.addEventListener) {
-  window.screen.orientation.addEventListener('change', applyPose);
-} else {
-  landscapeQuery.addEventListener('change', applyPose);
-}
+if (orientationApi) orientationApi.addEventListener('change', () => applyPose());
+else landscapeQuery.addEventListener('change', () => applyPose());
 ```
 
    and, with the other button handlers near the bottom:
@@ -841,7 +896,7 @@ document.addEventListener('keydown', event => {
 });
 ```
 
-6. Boot: after `createGrid();` call `applyPose();` (the engine now has the right gravity before the first move; note `createGrid` already calls `updateBoardSizing`, which reads `pose`, so `pose` must be declared above it in the file).
+6. Boot: after `createGrid();` call `applyPose({ animate: false });` so a saved `turns` is in place without the board spinning into position on load (the engine now has the right gravity before the first move; note `createGrid` already calls `updateBoardSizing`, which reads `pose`, so `pose` must be declared above it in the file).
 
 - [ ] **Step 3: Board-local geometry for effects and animations**
 

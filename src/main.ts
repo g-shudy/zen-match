@@ -191,27 +191,40 @@ function sleep(ms: number): Promise<void> {
 
 const landscapeQuery = window.matchMedia('(orientation: landscape)');
 
+const orientationApi = typeof window.screen.orientation?.angle === 'number' ? window.screen.orientation : null;
+
 function deviceAngle(): number {
-  const angle = window.screen.orientation?.angle;
-  if (typeof angle === 'number') return angle;
-  return landscapeQuery.matches ? 90 : 0;
+  return orientationApi ? orientationApi.angle : landscapeQuery.matches ? 90 : 0;
 }
 
 const pose: { rotation: Rotation; visualRotation: number } = { rotation: 0, visualRotation: 0 };
 
-function applyPose(): void {
+function applyPose({ animate = true }: { animate?: boolean } = {}): void {
   const next = boardPose(deviceAngle(), settings.turns);
   // Keep the CSS angle continuous so a turn always animates the short way round.
   let delta = next.rotation - pose.rotation;
   if (delta > 180) delta -= 360;
   if (delta < -180) delta += 360;
+  const turned = delta !== 0;
   pose.visualRotation += delta;
   pose.rotation = next.rotation;
+
+  const turnMs = animate && !reducedMotion() ? config.timing.turn : 0;
+  boardFrameEl.style.setProperty('--turn-ms', `${turnMs}ms`);
+  if (turnMs > 0 && turned) {
+    boardFrameEl.classList.add('turning');
+    window.setTimeout(() => boardFrameEl.classList.remove('turning'), turnMs);
+  }
   boardEl.style.setProperty('--board-rotation', `${pose.visualRotation}deg`);
-  boardEl.style.setProperty('--turn-ms', `${config.timing.turn}ms`);
   boardEl.dataset.rotation = String(pose.rotation);
   engine.setGravity(next.gravity);
   updateBoardSizing();
+  if (turnMs === 0) {
+    // Commit the instant change before restoring the duration, or the next
+    // style recalc would see the normal duration and animate anyway.
+    void boardEl.offsetHeight;
+    boardFrameEl.style.setProperty('--turn-ms', `${config.timing.turn}ms`);
+  }
 }
 
 function turnBoard(): void {
@@ -220,11 +233,8 @@ function turnBoard(): void {
   applyPose();
 }
 
-if (window.screen.orientation?.addEventListener) {
-  window.screen.orientation.addEventListener('change', applyPose);
-} else {
-  landscapeQuery.addEventListener('change', applyPose);
-}
+if (orientationApi) orientationApi.addEventListener('change', () => applyPose());
+else landscapeQuery.addEventListener('change', () => applyPose());
 
 // ---------------------------------------------------------------------------
 // Palette
@@ -364,7 +374,7 @@ function updateBoardSizing(): void {
 
   layout.cell = cellSize;
   layout.gap = gap;
-  layout.pad = boardPadding / 2;
+  layout.pad = narrow ? 6 : 16;
 
   boardEl.style.setProperty('--grid-cols', String(config.cols));
   boardEl.style.setProperty('--cell-size', `${cellSize}px`);
@@ -1385,7 +1395,7 @@ function showFirstVisitTip(): void {
 
 applyPalette(settings.palette);
 createGrid();
-applyPose();
+applyPose({ animate: false });
 if (!tryResume()) {
   void startNewGame({ transition: false });
 }

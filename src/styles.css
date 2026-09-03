@@ -102,6 +102,7 @@
 
 html {
   height: 100%;
+  overflow: hidden;
 }
 
 body {
@@ -368,6 +369,25 @@ button {
   initial-value: 0deg;
 }
 
+/* Registered so a turn can ease the cell size along with the rotation. */
+@property --cell-size {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 48px;
+}
+
+@property --gem-size {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 40px;
+}
+
+@property --board-scale {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
+
 #newGame {
   position: relative;
   touch-action: none;
@@ -454,6 +474,13 @@ button {
 .board-frame {
   grid-area: board;
   position: relative;
+  /* The lift rides here, not on .board: the board's transform is under a
+     transition, which interpolates between its two end matrices and so never
+     sees --board-scale change mid-flight. The frame has no transform
+     transition, and the board is centred in it, so scaling the frame lifts the
+     board about the same centre. */
+  transform: scale(var(--board-scale, 1));
+  transition: width var(--turn-ms, 600ms) var(--ease), height var(--turn-ms, 600ms) var(--ease);
 }
 
 .board {
@@ -474,7 +501,21 @@ button {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  transition: box-shadow 1.2s var(--ease), transform var(--turn-ms, 600ms) var(--ease);
+  transition:
+    box-shadow 1.2s var(--ease),
+    transform var(--turn-ms, 600ms) var(--ease),
+    --cell-size var(--turn-ms, 600ms) var(--ease),
+    --gem-size var(--turn-ms, 600ms) var(--ease);
+}
+
+/* A turn lifts the board a little so its corners do not sweep over the chrome. */
+.board-frame.turning {
+  animation: turnLift var(--turn-ms, 600ms) var(--ease);
+}
+
+@keyframes turnLift {
+  0%, 100% { --board-scale: 1; }
+  50% { --board-scale: 0.82; }
 }
 
 /* A long cascade brightens the frame like a slow inhale - no flash, no shake. */
@@ -1406,6 +1447,14 @@ button {
 
   .board {
     transition: box-shadow 1.2s var(--ease);
+  }
+
+  .board-frame {
+    transition: none;
+  }
+
+  .board-frame.turning {
+    animation: none;
   }
 
   /* The hold ring stays: it is the progress indicator. Only the completion pulse goes. */
