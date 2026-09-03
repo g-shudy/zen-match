@@ -109,6 +109,25 @@ test('fillGems enters new gems from the edge opposite gravity, each travelling t
   }
 });
 
+test('Refill avoidance works in every direction: an emptied line never refills as a run of three', () => {
+  // Under the old guard, 'up' and 'left' looked at cells not yet filled and could
+  // complete a run of three inside the refilled line itself.
+  for (const gravity of ['down', 'up', 'right', 'left']) {
+    for (let seed = 0; seed < 60; seed++) {
+      const board = Array.from({ length: 3 }, (_, r) => Array.from({ length: 3 }, (_, c) => makeCell((r + c) % 2 === 0 ? 0 : 1)));
+      const isVertical = gravity === 'down' || gravity === 'up';
+      for (let i = 0; i < 3; i++) {
+        if (isVertical) board[i][1] = null;
+        else board[1][i] = null;
+      }
+      fillGems(board, 3, 3, 2, new RNG(seed), gravity);
+      const line = isVertical ? [board[0][1], board[1][1], board[2][1]] : [board[1][0], board[1][1], board[1][2]];
+      assert.ok(line.every(cell => cell !== null), `${gravity} seed ${seed}: line refilled`);
+      assert.ok(!(line[0].type === line[1].type && line[1].type === line[2].type), `${gravity} seed ${seed}: refilled a run of three`);
+    }
+  }
+});
+
 test('Gravity is read at the start of each wave, so a turn mid-cascade changes where refills come from', () => {
   let proved = false;
   for (let seed = 0; seed < 20 && !proved; seed++) {
@@ -227,7 +246,7 @@ export function fillGems(board: Board, rows: number, cols: number, gemTypes: num
       // Refill with the same match-avoidance the initial board uses. Without this
       // the engine builds a clean board then refills it carelessly, and below ~4
       // gem types the refill manufactures matches faster than they clear.
-      const type = pickNonMatchingType(board, pos.r, pos.c, gemTypes, rng);
+      const type = pickNonMatchingType(board, pos.r, pos.c, gemTypes, rng, gravity);
       board[pos.r][pos.c] = { type, special: SPECIAL.NONE, arms: null };
       // Every new gem starts n cells beyond the entry edge, so all of them travel
       // the same distance into place.
@@ -239,6 +258,37 @@ export function fillGems(board: Board, rows: number, cols: number, gemTypes: num
 }
 ```
 
+`pickNonMatchingType`'s look-back guard always checked the two cells above and the two to the left, which is only correct for the fill order `'down'`/`'right'` use — under `'up'`/`'left'` the fill order walks away from those cells, so they are still empty and the guard never fires. Replace it with a guard that looks back along the actual fall direction:
+
+```ts
+// Pick a gem type that does not immediately complete a 3-run with cells already
+// placed. Fill order runs from the entry edge inward, so "already placed" means
+// the two cells behind this one along its line (toward the entry edge, opposite
+// the fall) and the two beside it in the lines done earlier (the column to the
+// left for vertical gravity, the row above for horizontal). Under 'down' this is
+// the row-major look-back board generation has always used. It only looks back,
+// never forward: a run can still be completed from the other side, which is
+// acceptable and matches the original behaviour.
+function pickNonMatchingType(board: Board, r: number, c: number, gemTypes: number, rng: RNG, gravity: Gravity = 'down'): number {
+  const step = GRAVITY_STEP[gravity];
+  const vertical = step.dc === 0;
+  const behind = (k: number): number | undefined => board[r - k * step.dr]?.[c - k * step.dc]?.type;
+  const beside = (k: number): number | undefined => (vertical ? board[r]?.[c - k] : board[r - k]?.[c])?.type;
+  let type = 0;
+  let attempts = 0;
+  do {
+    type = rng.int(gemTypes);
+    attempts++;
+  } while (
+    attempts < 50 &&
+    ((behind(1) === type && behind(2) === type) || (beside(1) === type && beside(2) === type))
+  );
+  return type;
+}
+```
+
+The default parameter keeps every other caller unchanged: `init`'s `randomGem` and `regenerateBoard`'s `randomGem` closure keep calling `pickNonMatchingType` with no gravity argument, so board generation always uses the `'down'` guard. Under `'down'` this new guard is byte-for-byte equivalent to the old one (same two cells, OR order swapped, no behavioural difference), so the golden check still holds.
+
 Update every call site to pass gravity read from state at that moment:
 - In `resolveMove`, both combo tails: `dropGems(board, rows, cols, state.gravity)` and `fillGems(board, rows, cols, state.gemTypes, state.rng, state.gravity)`.
 - In `cascadeWaves`: the same two calls with `state.gravity`.
@@ -249,7 +299,7 @@ Expected: every call passes a gravity argument.
 - [ ] **Step 5: Run the tests and the typecheck**
 
 Run: `node build.mjs --test && node --test tests/engine.test.js && npm run typecheck && npm test`
-Expected: 44 engine tests; typecheck clean; 65 total (all pre-existing tests, which run under `'down'`, are unchanged: that is the golden check).
+Expected: 45 engine tests; typecheck clean; 66 total (all pre-existing tests, which run under `'down'`, are unchanged: that is the golden check).
 
 - [ ] **Step 6: Commit**
 

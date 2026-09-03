@@ -802,6 +802,25 @@ test('fillGems enters new gems from the edge opposite gravity, each travelling t
   }
 });
 
+test('Refill avoidance works in every direction: an emptied line never refills as a run of three', () => {
+  // Under the old guard, 'up' and 'left' looked at cells not yet filled and could
+  // complete a run of three inside the refilled line itself.
+  for (const gravity of ['down', 'up', 'right', 'left']) {
+    for (let seed = 0; seed < 60; seed++) {
+      const board = Array.from({ length: 3 }, (_, r) => Array.from({ length: 3 }, (_, c) => makeCell((r + c) % 2 === 0 ? 0 : 1)));
+      const isVertical = gravity === 'down' || gravity === 'up';
+      for (let i = 0; i < 3; i++) {
+        if (isVertical) board[i][1] = null;
+        else board[1][i] = null;
+      }
+      fillGems(board, 3, 3, 2, new RNG(seed), gravity);
+      const line = isVertical ? [board[0][1], board[1][1], board[2][1]] : [board[1][0], board[1][1], board[1][2]];
+      assert.ok(line.every(cell => cell !== null), `${gravity} seed ${seed}: line refilled`);
+      assert.ok(!(line[0].type === line[1].type && line[1].type === line[2].type), `${gravity} seed ${seed}: refilled a run of three`);
+    }
+  }
+});
+
 test('Gravity is read at the start of each wave, so a turn mid-cascade changes where refills come from', () => {
   let proved = false;
   for (let seed = 0; seed < 20 && !proved; seed++) {

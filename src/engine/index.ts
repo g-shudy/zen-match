@@ -242,12 +242,19 @@ function createEmptyBoard(rows: number, cols: number): Board {
   return Array.from({ length: rows }, () => Array.from({ length: cols }, () => null));
 }
 
-// Pick a gem type that does not immediately complete a 3-run with the two cells
-// to the left or the two above. Callers fill left-to-right, top-to-bottom, so
-// those neighbours are already settled. Only looks back, never forward: a run can
-// still be completed from the right, which is acceptable and matches the original
-// board-generation behaviour.
-function pickNonMatchingType(board: Board, r: number, c: number, gemTypes: number, rng: RNG): number {
+// Pick a gem type that does not immediately complete a 3-run with cells already
+// placed. Fill order runs from the entry edge inward, so "already placed" means
+// the two cells behind this one along its line (toward the entry edge, opposite
+// the fall) and the two beside it in the lines done earlier (the column to the
+// left for vertical gravity, the row above for horizontal). Under 'down' this is
+// the row-major look-back board generation has always used. It only looks back,
+// never forward: a run can still be completed from the other side, which is
+// acceptable and matches the original behaviour.
+function pickNonMatchingType(board: Board, r: number, c: number, gemTypes: number, rng: RNG, gravity: Gravity = 'down'): number {
+  const step = GRAVITY_STEP[gravity];
+  const vertical = step.dc === 0;
+  const behind = (k: number): number | undefined => board[r - k * step.dr]?.[c - k * step.dc]?.type;
+  const beside = (k: number): number | undefined => (vertical ? board[r]?.[c - k] : board[r - k]?.[c])?.type;
   let type = 0;
   let attempts = 0;
   do {
@@ -255,8 +262,7 @@ function pickNonMatchingType(board: Board, r: number, c: number, gemTypes: numbe
     attempts++;
   } while (
     attempts < 50 &&
-    ((c >= 2 && board[r][c - 1]?.type === type && board[r][c - 2]?.type === type) ||
-      (r >= 2 && board[r - 1]?.[c]?.type === type && board[r - 2]?.[c]?.type === type))
+    ((behind(1) === type && behind(2) === type) || (beside(1) === type && beside(2) === type))
   );
   return type;
 }
@@ -1144,7 +1150,7 @@ export function fillGems(board: Board, rows: number, cols: number, gemTypes: num
       // Refill with the same match-avoidance the initial board uses. Without this
       // the engine builds a clean board then refills it carelessly, and below ~4
       // gem types the refill manufactures matches faster than they clear.
-      const type = pickNonMatchingType(board, pos.r, pos.c, gemTypes, rng);
+      const type = pickNonMatchingType(board, pos.r, pos.c, gemTypes, rng, gravity);
       board[pos.r][pos.c] = { type, special: SPECIAL.NONE, arms: null };
       // Every new gem starts n cells beyond the entry edge, so all of them travel
       // the same distance into place.
