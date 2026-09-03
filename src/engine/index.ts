@@ -6,12 +6,11 @@ export const SPECIAL = {
 } as const;
 
 export type Special = typeof SPECIAL[keyof typeof SPECIAL];
-export type Direction = 'horizontal' | 'vertical' | 'cross' | null;
 
 export interface Cell {
   type: number;
   special: Special;
-  direction: Direction;
+  arms: Arms | null; // 1..15 on a beam gem, null otherwise
 }
 
 export type Board = (Cell | null)[][];
@@ -76,7 +75,6 @@ export type RemovalAnim = 'matched' | 'exploding' | 'line-cleared' | 'rainbow-cl
 
 export type Effect =
   | { kind: 'explosion'; r: number; c: number }
-  | { kind: 'line'; direction: 'horizontal' | 'vertical'; row?: number; col?: number }
   | { kind: 'beam'; from: Pos; dir: BeamDir };
 
 export interface ScoreBreakdown {
@@ -137,6 +135,7 @@ interface MatchGroup {
   isComplex: boolean;
   direction: 'horizontal' | 'vertical' | 'both';
   type: number;
+  intersection: Pos | null; // the cell shared by a horizontal and a vertical run, when there is one
 }
 
 export function cloneBoard(board: Board): Board {
@@ -272,7 +271,7 @@ export class Engine {
         board[r][c] = {
           type: this.randomGem(board, r, c),
           special: SPECIAL.NONE,
-          direction: null
+          arms: null
         };
       }
     }
@@ -284,7 +283,7 @@ export class Engine {
           board[r][c] = {
             type: this.randomGem(board, r, c),
             special: SPECIAL.NONE,
-            direction: null
+            arms: null
           };
         }
       }
@@ -333,10 +332,10 @@ export class Engine {
     // players for setting them up adjacently. The interaction rules:
     // - Rainbow+Rainbow: clears both colors
     // - Rainbow+Bomb: all gems of that color explode (3x3 each)
-    // - Rainbow+Line: all gems of that color become line clears
+    // - Rainbow+Beam: all gems of that color fire the beam gem's arms
     // - Bomb+Bomb: 5x5 explosion
-    // - Line+Line: cross clear (full row + column)
-    // - Bomb+Line: 3-wide line clear
+    // - Beam+Beam: the union of both arm masks, fired from pos1
+    // - Bomb+Beam: each arm fired three cells wide
     if (bothAreSpecial) {
       const specials = [gem1Special, gem2Special];
       const isRainbowCombo = specials.includes(SPECIAL.RAINBOW);
@@ -349,6 +348,10 @@ export class Engine {
       const effects: Effect[] = [];
       let points = 0;
       let chainReactionCount = 0;
+
+      // Both swapped specials are consumed by the combo, whatever shape it fires.
+      toRemove.add(keyFor(pos1.r, pos1.c));
+      toRemove.add(keyFor(pos2.r, pos2.c));
 
       if (isRainbowCombo) {
         const gem1IsRainbow = gem1Special === SPECIAL.RAINBOW;
@@ -404,31 +407,14 @@ export class Engine {
         } else if (otherSpecial === SPECIAL.LINE) {
           const targetType = gem1IsRainbow ? gem2?.type : gem1?.type;
           const lineGem = gem1IsRainbow ? gem2 : gem1;
-          const isVertical = lineGem?.direction === 'vertical';
+          const arms = lineGem?.arms ?? ARMS_HORIZONTAL;
 
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
-              if (board[r][c]?.type === targetType) {
-                if (isVertical) {
-                  for (let i = 0; i < rows; i++) {
-                    if (board[i][c]) {
-                      const k = keyFor(i, c);
-                      toRemove.add(k);
-                      animationClasses.set(k, 'line-cleared');
-                    }
-                  }
-                  effects.push({ kind: 'line', direction: 'vertical', col: c });
-                } else {
-                  for (let i = 0; i < cols; i++) {
-                    if (board[r][i]) {
-                      const k = keyFor(r, i);
-                      toRemove.add(k);
-                      animationClasses.set(k, 'line-cleared');
-                    }
-                  }
-                  effects.push({ kind: 'line', direction: 'horizontal', row: r });
-                }
-              }
+              if (board[r][c]?.type !== targetType) continue;
+              const beam = beamCells({ r, c }, arms, rows, cols);
+              claimCells(toRemove, animationClasses, beam.cells, 'line-cleared');
+              effects.push(...beam.effects);
             }
           }
 
@@ -467,56 +453,18 @@ export class Engine {
         effects.push({ kind: 'explosion', r: pos1.r, c: pos1.c });
         points = 1000 + toRemove.size * 15;
       } else if (isLineCombo) {
-        for (let i = 0; i < cols; i++) {
-          if (board[pos1.r][i]) {
-            const k = keyFor(pos1.r, i);
-            toRemove.add(k);
-            animationClasses.set(k, 'line-cleared');
-          }
-        }
-        for (let i = 0; i < rows; i++) {
-          if (board[i][pos1.c]) {
-            const k = keyFor(i, pos1.c);
-            toRemove.add(k);
-            animationClasses.set(k, 'line-cleared');
-          }
-        }
-        effects.push({ kind: 'line', direction: 'horizontal', row: pos1.r });
-        effects.push({ kind: 'line', direction: 'vertical', col: pos1.c });
+        const arms = (gem1?.arms ?? 0) | (gem2?.arms ?? 0);
+        const beam = beamCells({ r: pos1.r, c: pos1.c }, arms || ARMS_ALL, rows, cols);
+        claimCells(toRemove, animationClasses, beam.cells, 'line-cleared');
+        effects.push(...beam.effects);
         points = 800 + toRemove.size * 12;
       } else if (isBombLineCombo) {
         const lineGem = gem1Special === SPECIAL.LINE ? gem1 : gem2;
+        // After the swap the beam gem sits where the other gem started.
         const linePos = gem1Special === SPECIAL.LINE ? { r: pos2.r, c: pos2.c } : { r: pos1.r, c: pos1.c };
-
-        if (lineGem?.direction === 'vertical') {
-          for (let dc = -1; dc <= 1; dc++) {
-            const col = linePos.c + dc;
-            if (col >= 0 && col < cols) {
-              for (let i = 0; i < rows; i++) {
-                if (board[i][col]) {
-                  const k = keyFor(i, col);
-                  toRemove.add(k);
-                  animationClasses.set(k, 'line-cleared');
-                }
-              }
-              effects.push({ kind: 'line', direction: 'vertical', col });
-            }
-          }
-        } else {
-          for (let dr = -1; dr <= 1; dr++) {
-            const row = linePos.r + dr;
-            if (row >= 0 && row < rows) {
-              for (let i = 0; i < cols; i++) {
-                if (board[row][i]) {
-                  const k = keyFor(row, i);
-                  toRemove.add(k);
-                  animationClasses.set(k, 'line-cleared');
-                }
-              }
-              effects.push({ kind: 'line', direction: 'horizontal', row });
-            }
-          }
-        }
+        const beam = beamCells(linePos, lineGem?.arms ?? ARMS_HORIZONTAL, rows, cols, 1);
+        claimCells(toRemove, animationClasses, beam.cells, 'line-cleared');
+        effects.push(...beam.effects);
         points = 1200 + toRemove.size * 15;
       }
 
@@ -715,6 +663,17 @@ function removePositions(board: Board, toRemove: Set<string>): void {
   }
 }
 
+// Claim every cell of a beam sweep into the removal set with one animation class.
+// Shared by the three swap-combo branches that fire a beam gem's arms (rainbow+beam,
+// beam+beam, bomb+beam) so the four-line loop is not repeated three times.
+function claimCells(toRemove: Set<string>, animationClasses: Map<string, RemovalAnim>, cells: Pos[], anim: RemovalAnim): void {
+  for (const pos of cells) {
+    const k = keyFor(pos.r, pos.c);
+    toRemove.add(k);
+    animationClasses.set(k, anim);
+  }
+}
+
 export function findMatches(board: Board, rows: number, cols: number): MatchGroup[] {
   const matchedCells = new Map<string, { r: number; c: number; type: number; direction: 'horizontal' | 'vertical'; isComplex?: boolean }>();
 
@@ -783,6 +742,7 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
     const match: Pos[] = [];
     const queue = [key];
     let hasComplex = false;
+    let intersection: Pos | null = null;
     let hDir = false;
     let vDir = false;
 
@@ -795,7 +755,10 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
       if (!cellData) continue;
 
       match.push({ r: cellData.r, c: cellData.c });
-      if (cellData.isComplex) hasComplex = true;
+      if (cellData.isComplex) {
+        hasComplex = true;
+        if (!intersection) intersection = { r: cellData.r, c: cellData.c };
+      }
       if (cellData.direction === 'horizontal') hDir = true;
       if (cellData.direction === 'vertical') vDir = true;
 
@@ -821,7 +784,8 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
       effectiveLen: match.length,
       isComplex: hasComplex,
       direction: hDir && vDir ? 'both' : (hDir ? 'horizontal' : 'vertical'),
-      type: data.type
+      type: data.type,
+      intersection
     });
   }
 
@@ -886,38 +850,18 @@ function activateSpecialsInRemovalSet(
         bonusPoints += 150;
       } else if (gem.special === SPECIAL.LINE) {
         chainCount++;
-        const dir = gem.direction || 'horizontal';
-
-        if (dir === 'horizontal' || dir === 'cross') {
-          for (let i = 0; i < cols; i++) {
-            const newKey = keyFor(r, i);
-            if (!toRemove.has(newKey)) {
-              toRemove.add(newKey);
-              animationClasses.set(newKey, 'line-cleared');
-              stepPositions.push({ r, c: i });
-              stepAnimations[newKey] = 'line-cleared';
-              newSpecialsFound = true;
-            }
-          }
-          stepEffects.push({ kind: 'line', direction: 'horizontal', row: r });
-          effects.push({ kind: 'line', direction: 'horizontal', row: r });
+        const beam = beamCells({ r, c }, gem.arms ?? ARMS_HORIZONTAL, rows, cols);
+        for (const pos of beam.cells) {
+          const newKey = keyFor(pos.r, pos.c);
+          if (toRemove.has(newKey)) continue;
+          toRemove.add(newKey);
+          animationClasses.set(newKey, 'line-cleared');
+          stepPositions.push(pos);
+          stepAnimations[newKey] = 'line-cleared';
+          newSpecialsFound = true;
         }
-
-        if (dir === 'vertical' || dir === 'cross') {
-          for (let i = 0; i < rows; i++) {
-            const newKey = keyFor(i, c);
-            if (!toRemove.has(newKey)) {
-              toRemove.add(newKey);
-              animationClasses.set(newKey, 'line-cleared');
-              stepPositions.push({ r: i, c });
-              stepAnimations[newKey] = 'line-cleared';
-              newSpecialsFound = true;
-            }
-          }
-          stepEffects.push({ kind: 'line', direction: 'vertical', col: c });
-          effects.push({ kind: 'line', direction: 'vertical', col: c });
-        }
-
+        stepEffects.push(...beam.effects);
+        effects.push(...beam.effects);
         animationClasses.set(key, 'line-cleared');
         bonusPoints += 200;
       } else if (gem.special === SPECIAL.RAINBOW) {
@@ -994,6 +938,17 @@ function findBestSpecialPosition(match: MatchGroup, lastSwapPos: EngineState['la
   return bestPos;
 }
 
+// Arms of a five-cell L, T or plus: one for each in-group neighbour of the intersection.
+function armsFromIntersection(match: MatchGroup): Arms {
+  const at = match.intersection!;
+  const inGroup = new Set(match.positions.map(p => keyFor(p.r, p.c)));
+  let arms = 0;
+  for (const step of ARM_STEPS) {
+    if (inGroup.has(keyFor(at.r + step.dr, at.c + step.dc))) arms |= step.arm;
+  }
+  return arms;
+}
+
 function processMatches(state: EngineState, frames: Frame[]): { points: number } {
   const { rows, cols, board } = state;
   let matches = findMatches(board, rows, cols);
@@ -1007,7 +962,7 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
     comboCount++;
 
     const toRemove = new Set<string>();
-    const specials: Array<{ pos: Pos; type: number; special: Special; direction?: Direction }> = [];
+    const specials: Array<{ pos: Pos; type: number; special: Special; arms?: Arms }> = [];
     let matchBonus = 0;
     const animationClasses = new Map<string, RemovalAnim>();
     const effects: Effect[] = [];
@@ -1016,20 +971,19 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
       const len = match.effectiveLen || match.positions.length;
       const type = match.type;
 
-      // Phase 3B: T/L shapes (isComplex) -> BOMB; only len >= 6 -> RAINBOW
+      // Phase 3B: len >= 6 -> RAINBOW; a 5-cell L/T/plus (isComplex, has an intersection) -> beam gem
       if (len >= 6) {
         const pos = findBestSpecialPosition(match, state.lastSwapPos, comboCount);
         specials.push({ pos, type, special: SPECIAL.RAINBOW });
         matchBonus += 200;
-      } else if (match.isComplex && len >= 5) {
-        const pos = findBestSpecialPosition(match, state.lastSwapPos, comboCount);
-        specials.push({ pos, type, special: SPECIAL.BOMB });
+      } else if (len === 5 && match.intersection) {
+        // L, T or plus: the gem sits where the legs meet and fires along each of them.
+        specials.push({ pos: match.intersection, type, special: SPECIAL.LINE, arms: armsFromIntersection(match) });
         matchBonus += 150;
       } else if (len === 5) {
         const pos = findBestSpecialPosition(match, state.lastSwapPos, comboCount);
-        // Phase 3C: Line direction same as match (not perpendicular)
-        const clearDir = match.direction === 'horizontal' ? 'horizontal' : 'vertical';
-        specials.push({ pos, type, special: SPECIAL.LINE, direction: clearDir });
+        const arms = match.direction === 'horizontal' ? ARMS_HORIZONTAL : ARMS_VERTICAL;
+        specials.push({ pos, type, special: SPECIAL.LINE, arms });
         matchBonus += 100;
       } else if (len === 4) {
         const pos = findBestSpecialPosition(match, state.lastSwapPos, comboCount);
@@ -1090,7 +1044,7 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
         board[sp.pos.r][sp.pos.c] = {
           type: sp.type,
           special: sp.special,
-          direction: sp.direction ?? null
+          arms: sp.arms ?? null
         };
         usedPositions.add(posKey);
         newSpecialPositions.push(sp.pos);
@@ -1161,7 +1115,7 @@ function fillGems(board: Board, rows: number, cols: number, gemTypes: number, rn
       board[r][c] = {
         type,
         special: SPECIAL.NONE,
-        direction: null
+        arms: null
       };
       moves.push({ from: { r: i - emptyRows.length, c }, to: { r, c }, type });
     }
@@ -1247,10 +1201,10 @@ function ensurePlayableBoard(board: Board, rows: number, cols: number, gemTypes:
     const other = (t + 1) % gemTypes;
 
     const saved = [board[r][c], board[r][c + 1], board[r][c + 2], board[r + 1][c + 2]];
-    board[r][c] = { type: t, special: SPECIAL.NONE, direction: null };
-    board[r][c + 1] = { type: t, special: SPECIAL.NONE, direction: null };
-    board[r][c + 2] = { type: other, special: SPECIAL.NONE, direction: null };
-    board[r + 1][c + 2] = { type: t, special: SPECIAL.NONE, direction: null };
+    board[r][c] = { type: t, special: SPECIAL.NONE, arms: null };
+    board[r][c + 1] = { type: t, special: SPECIAL.NONE, arms: null };
+    board[r][c + 2] = { type: other, special: SPECIAL.NONE, arms: null };
+    board[r + 1][c + 2] = { type: t, special: SPECIAL.NONE, arms: null };
 
     // The plant must not itself create a live match.
     if (findMatches(board, rows, cols).length === 0 && hasValidMoves(board, rows, cols)) return;
@@ -1392,7 +1346,7 @@ function regenerateBoard(state: EngineState): void {
       board[r][c] = {
         type: randomGem(r, c),
         special: SPECIAL.NONE,
-        direction: null
+        arms: null
       };
     }
   }
@@ -1404,7 +1358,7 @@ function regenerateBoard(state: EngineState): void {
         board[r][c] = {
           type: randomGem(r, c),
           special: SPECIAL.NONE,
-          direction: null
+          arms: null
         };
       }
     }

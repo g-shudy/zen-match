@@ -14,8 +14,8 @@ import {
   findMatches
 } from '../dist/engine.js';
 
-function makeCell(type, special = SPECIAL.NONE, direction = null) {
-  return { type, special, direction };
+function makeCell(type, special = SPECIAL.NONE, arms = null) {
+  return { type, special, arms };
 }
 
 test('RNG is deterministic for a seed', () => {
@@ -28,7 +28,7 @@ test('RNG is deterministic for a seed', () => {
 
 test('Special swap counts as a valid move', () => {
   const board = [
-    [makeCell(0, SPECIAL.BOMB), makeCell(1, SPECIAL.LINE, 'horizontal')],
+    [makeCell(0, SPECIAL.BOMB), makeCell(1, SPECIAL.LINE, ARMS_HORIZONTAL)],
     [makeCell(2), makeCell(3)]
   ];
   assert.equal(hasValidMoves(board, 2, 2), true);
@@ -95,79 +95,29 @@ test('BFS-unified parallel 3-runs get correct effectiveLen', () => {
   assert.equal(colorZeroMatch.effectiveLen, 6, 'effectiveLen should equal actual group size (6)');
 });
 
-// Phase 3B: T/L shape (5 cells) -> BOMB, not RAINBOW
-test('T/L shape of 5 cells creates BOMB, not RAINBOW', () => {
-  // T-shape:
-  //   0 0 0
-  //   1 0 1
-  //   1 0 1
-  //   1 1 1
-  const engine = new Engine({ rows: 4, cols: 3, gemTypes: 3, seed: 42 });
+// Phase 3C: Straight 5-match -> LINE in same direction as match
+test('Straight 5 makes a Line beam gem on the swapped cell with both arms along its axis', () => {
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
   const board = [
-    [makeCell(0), makeCell(0), makeCell(0)],
-    [makeCell(1), makeCell(0), makeCell(1)],
-    [makeCell(1), makeCell(0), makeCell(2)],
-    [makeCell(2), makeCell(2), makeCell(2)]
-  ];
+    [1, 2, 3, 1, 2],
+    [2, 3, 0, 2, 3],
+    [0, 0, 1, 0, 0],
+    [1, 2, 3, 1, 2],
+    [2, 3, 1, 2, 3]
+  ].map(row => row.map(t => makeCell(t)));
+  assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
 
   engine.setBoard(board);
+  const result = engine.swap({ r: 1, c: 2 }, { r: 2, c: 2 });
 
-  const matches = findMatches(board, 4, 3);
-  const zeroMatch = matches.find(m => m.type === 0);
-  assert.ok(zeroMatch, 'Should find color-0 match group');
-  assert.ok(zeroMatch.isComplex, 'T/L shape should be marked complex');
-
-  // Now do a swap to trigger the match processing
-  // Swap (3,0) with (2,0) to trigger the color-2 match and color-0 match
-  // Actually, let's construct a board where a swap triggers a T/L
-  const engine2 = new Engine({ rows: 4, cols: 4, gemTypes: 4, seed: 42 });
-  const board2 = [
-    [makeCell(0), makeCell(0), makeCell(1), makeCell(2)],
-    [makeCell(2), makeCell(0), makeCell(2), makeCell(3)],
-    [makeCell(3), makeCell(0), makeCell(3), makeCell(1)],
-    [makeCell(1), makeCell(2), makeCell(1), makeCell(3)]
-  ];
-  // Swapping (0,2) with (0,1) would put 0 at (0,2) but that's already 0 at (0,0) and (0,1)
-  // Column 1 already has 0 at rows 0,1,2 -> that's a vertical 3-match
-  // Row 0 has 0 at cols 0,1 -> if we put another 0 at col 2, row 0 has 0,0,0 -> horizontal 3-match
-  // The intersection at (0,1) means it's complex with 5 cells total
-  // Let's just check the findMatches behavior directly
-  const board3 = [
-    [makeCell(0), makeCell(0), makeCell(0), makeCell(2)],
-    [makeCell(2), makeCell(0), makeCell(2), makeCell(3)],
-    [makeCell(3), makeCell(0), makeCell(3), makeCell(1)],
-    [makeCell(1), makeCell(2), makeCell(1), makeCell(3)]
-  ];
-
-  const matches3 = findMatches(board3, 4, 4);
-  const zeroMatch3 = matches3.find(m => m.type === 0);
-  assert.ok(zeroMatch3, 'Should find color-0 T/L match');
-  assert.equal(zeroMatch3.positions.length, 5, 'T-shape should have 5 cells');
-  assert.ok(zeroMatch3.isComplex, 'T/L should be complex');
-  // With the new rules: 5 cells + isComplex -> BOMB (not RAINBOW)
-  // effectiveLen = 5 (actual group size), isComplex = true
-  // processMatches check: isComplex && len >= 5 -> BOMB
-  assert.equal(zeroMatch3.effectiveLen, 5);
-});
-
-// Phase 3C: Straight 5-match -> LINE in same direction as match
-test('Straight 5-match creates LINE in same direction', () => {
-  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
-  // Horizontal 5-match on row 0
-  const board = [
-    [makeCell(0), makeCell(0), makeCell(0), makeCell(0), makeCell(0)],
-    [makeCell(1), makeCell(2), makeCell(1), makeCell(2), makeCell(1)],
-    [makeCell(2), makeCell(1), makeCell(2), makeCell(1), makeCell(2)],
-    [makeCell(1), makeCell(2), makeCell(1), makeCell(2), makeCell(1)],
-    [makeCell(2), makeCell(1), makeCell(2), makeCell(1), makeCell(2)]
-  ];
-
-  const matches = findMatches(board, 5, 5);
-  const hMatch = matches.find(m => m.type === 0);
-  assert.ok(hMatch, 'Should find horizontal 5-match');
-  assert.equal(hMatch.direction, 'horizontal');
-  assert.equal(hMatch.effectiveLen, 5);
-  assert.equal(hMatch.isComplex, false, 'Straight line is not complex');
+  const placed = result.frames.find(f => f.kind === 'board' && f.newSpecials);
+  assert.ok(placed, 'a special must be placed');
+  assert.deepEqual(placed.newSpecials, [{ r: 2, c: 2 }]);
+  const gem = placed.board[2][2];
+  assert.equal(gem.special, SPECIAL.LINE);
+  assert.equal(gem.arms, ARMS_HORIZONTAL);
+  const remove = result.frames.find(f => f.kind === 'remove');
+  assert.equal(remove.score.breakdown.matchBonus, 100 + 4 * 20, 'line bonus plus the length bonus');
 });
 
 // Phase 3B: 6+ cell group -> RAINBOW
@@ -491,4 +441,229 @@ test('beamCells: a corner gem with both arms off the board keeps its three-wide 
   const { cells, effects } = beamCells({ r: 4, c: 4 }, ARM.RIGHT | ARM.DOWN, 5, 5, 1);
   assert.deepEqual(keys(cells), ['3,4', '4,3', '4,4']);
   assert.equal(effects.length, 0);
+});
+
+// --- Beam gem creation ---------------------------------------------------------
+
+function placedSpecial(result) {
+  const frame = result.frames.find(f => f.kind === 'board' && f.newSpecials);
+  assert.ok(frame, 'a special must be placed');
+  assert.equal(frame.newSpecials.length, 1, 'exactly one special for the one group');
+  const pos = frame.newSpecials[0];
+  return { pos, gem: frame.board[pos.r][pos.c], frame };
+}
+
+test('L of 5 makes a Corner beam gem on the intersection with an arm along each leg', () => {
+  // Swapping (1,2) down into (2,2) completes row 2 cols 2-4 and column 2 rows 2-4.
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  const board = [
+    [1, 2, 3, 1, 2],
+    [2, 3, 0, 2, 3],
+    [3, 1, 1, 0, 0],
+    [1, 2, 0, 3, 1],
+    [2, 3, 0, 1, 2]
+  ].map(row => row.map(t => makeCell(t)));
+  assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
+
+  engine.setBoard(board);
+  const result = engine.swap({ r: 1, c: 2 }, { r: 2, c: 2 });
+  const { pos, gem } = placedSpecial(result);
+  assert.deepEqual(pos, { r: 2, c: 2 });
+  assert.equal(gem.special, SPECIAL.LINE);
+  assert.equal(gem.arms, ARM.RIGHT | ARM.DOWN);
+  const remove = result.frames.find(f => f.kind === 'remove');
+  assert.equal(remove.score.breakdown.matchBonus, 150 + 4 * 20);
+});
+
+test('T of 5 makes a Tee beam gem with three arms', () => {
+  // Swapping (1,2) down into (2,2) completes the bar (2,1)-(2,3) and the stem (2,2)-(4,2).
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  const board = [
+    [1, 2, 3, 1, 2],
+    [2, 3, 0, 2, 3],
+    [3, 0, 1, 0, 1],
+    [1, 2, 0, 3, 2],
+    [2, 3, 0, 1, 3]
+  ].map(row => row.map(t => makeCell(t)));
+  assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
+
+  engine.setBoard(board);
+  const result = engine.swap({ r: 1, c: 2 }, { r: 2, c: 2 });
+  const { pos, gem } = placedSpecial(result);
+  assert.deepEqual(pos, { r: 2, c: 2 });
+  assert.equal(gem.arms, ARM.LEFT | ARM.RIGHT | ARM.DOWN);
+});
+
+test('Plus of 5 (only a cascade can make one) makes a Cross beam gem with all four arms', () => {
+  // A plus cannot come from one swap: the swapped-out gem would break an arm. So the
+  // plus already sits on the board and an unrelated swap triggers processing.
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  const board = [
+    [1, 2, 3, 1, 2],
+    [2, 3, 0, 2, 3],
+    [3, 0, 0, 0, 1],
+    [1, 2, 0, 3, 2],
+    [2, 3, 1, 1, 3]
+  ].map(row => row.map(t => makeCell(t)));
+
+  engine.setBoard(board);
+  const result = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
+  const { pos, gem } = placedSpecial(result);
+  assert.deepEqual(pos, { r: 2, c: 2 });
+  assert.equal(gem.arms, ARMS_ALL);
+});
+
+test('A shape made by a cascade is placed on its intersection, not near the centroid', () => {
+  // The L already exists; the swap is elsewhere and creates nothing itself.
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  const board = [
+    [1, 2, 3, 1, 2],
+    [2, 3, 1, 2, 3],
+    [3, 1, 0, 0, 0],
+    [1, 2, 0, 3, 1],
+    [2, 3, 0, 1, 2]
+  ].map(row => row.map(t => makeCell(t)));
+
+  engine.setBoard(board);
+  const result = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
+  const { pos, gem } = placedSpecial(result);
+  assert.deepEqual(pos, { r: 2, c: 2 }, 'the corner, where the legs meet');
+  assert.equal(gem.arms, ARM.RIGHT | ARM.DOWN);
+});
+
+test('findMatches reports the intersection of an L and none for a straight run', () => {
+  const l = [
+    [0, 0, 0, 2],
+    [0, 1, 2, 3],
+    [0, 2, 3, 1],
+    [1, 3, 1, 2]
+  ].map(row => row.map(t => makeCell(t)));
+  const group = findMatches(l, 4, 4).find(m => m.type === 0);
+  assert.deepEqual(group.intersection, { r: 0, c: 0 });
+
+  const straight = [
+    [0, 0, 0, 0, 0],
+    [1, 2, 1, 2, 1],
+    [2, 1, 2, 1, 2]
+  ].map(row => row.map(t => makeCell(t)));
+  assert.equal(findMatches(straight, 3, 5)[0].intersection, null);
+});
+
+// --- Beam gem activation ------------------------------------------------------
+
+function removeFrame(result) {
+  const frame = result.frames.find(f => f.kind === 'remove');
+  assert.ok(frame, 'expected a remove frame');
+  return frame;
+}
+
+test('A matched beam gem fires each arm to the edge and nothing else', () => {
+  // Beam gem (arms right + down) at (1,1). Swapping (2,0) and (2,1) completes column 1 rows 0-2.
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  const board = [
+    [1, 0, 3, 1, 2],
+    [2, 0, 3, 2, 3],
+    [0, 2, 1, 3, 1],
+    [1, 3, 2, 1, 2],
+    [2, 1, 3, 2, 3]
+  ].map(row => row.map(t => makeCell(t)));
+  board[1][1] = makeCell(0, SPECIAL.LINE, ARM.RIGHT | ARM.DOWN);
+  assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
+
+  engine.setBoard(board);
+  const frame = removeFrame(engine.swap({ r: 2, c: 0 }, { r: 2, c: 1 }));
+  const removed = keys(frame.positions);
+  assert.deepEqual(removed, ['0,1', '1,1', '1,2', '1,3', '1,4', '2,1', '3,1', '4,1']);
+  assert.deepEqual(frame.effects.filter(e => e.kind === 'beam').map(e => e.dir).sort(), ['down', 'right']);
+  assert.equal(frame.subSteps.length, 1);
+  assert.deepEqual(frame.subSteps[0].triggerPos, { r: 1, c: 1 });
+});
+
+test('A beam gem on the edge with arms pointing off the board clears only its match', () => {
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  const board = [
+    [1, 2, 0, 1, 0],
+    [2, 3, 1, 0, 2],
+    [3, 1, 2, 3, 1],
+    [1, 2, 3, 1, 2],
+    [2, 3, 1, 2, 3]
+  ].map(row => row.map(t => makeCell(t)));
+  board[0][4] = makeCell(0, SPECIAL.LINE, ARM.UP | ARM.RIGHT);
+  assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
+
+  engine.setBoard(board);
+  const frame = removeFrame(engine.swap({ r: 1, c: 3 }, { r: 0, c: 3 }));
+  assert.deepEqual(keys(frame.positions), ['0,2', '0,3', '0,4']);
+  assert.equal(frame.effects.filter(e => e.kind === 'beam').length, 0);
+});
+
+// A 5x5 with type (r + c) % 3 + 1 has no run of three anywhere; specials are placed on it.
+function cyclicBoard() {
+  return Array.from({ length: 5 }, (_, r) => Array.from({ length: 5 }, (_, c) => makeCell(((r + c) % 3) + 1)));
+}
+
+test('Beam + beam fires the union of both arm masks from the first-selected cell', () => {
+  const board = cyclicBoard();
+  board[2][2] = makeCell(2, SPECIAL.LINE, ARM.UP | ARM.RIGHT);
+  board[2][3] = makeCell(3, SPECIAL.LINE, ARM.DOWN | ARM.LEFT);
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  engine.setBoard(board);
+
+  const frame = removeFrame(engine.swap({ r: 2, c: 2 }, { r: 2, c: 3 }));
+  assert.equal(frame.positions.length, 9, 'row 2 plus column 2');
+  assert.equal(frame.score.points, 800 + 9 * 12);
+  assert.equal(frame.effects.filter(e => e.kind === 'beam').length, 4);
+});
+
+test('Beam + bomb fires each arm three cells wide', () => {
+  const board = cyclicBoard();
+  board[2][2] = makeCell(2, SPECIAL.BOMB);
+  board[2][3] = makeCell(3, SPECIAL.LINE, ARMS_HORIZONTAL);
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  engine.setBoard(board);
+
+  const frame = removeFrame(engine.swap({ r: 2, c: 2 }, { r: 2, c: 3 }));
+  assert.equal(frame.positions.length, 15, 'rows 1..3 across the board');
+  assert.equal(frame.score.points, 1200 + 15 * 15);
+  assert.equal(frame.effects.filter(e => e.kind === 'beam').length, 6);
+});
+
+test('Beam + rainbow gives every gem of the partner colour the same arms', () => {
+  const board = cyclicBoard();
+  board[2][2] = makeCell(2, SPECIAL.RAINBOW);
+  board[2][3] = makeCell(3, SPECIAL.LINE, ARMS_VERTICAL);
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  engine.setBoard(board);
+
+  const frame = removeFrame(engine.swap({ r: 2, c: 2 }, { r: 2, c: 3 }));
+  // After the swap the colour-3 gems sit in columns 0, 1, 2 and 4; each fires its column.
+  assert.equal(frame.positions.length, 4 * 5 + 1, 'four full columns plus the rainbow');
+  assert.equal(frame.score.points, 2500 + 21 * 20);
+  for (const key of ['0,3', '1,3', '3,3', '4,3']) {
+    assert.ok(!keys(frame.positions).includes(key), `${key} in column 3 must survive`);
+  }
+});
+
+test('Every combo consumes both swapped specials', () => {
+  const board = cyclicBoard();
+  board[2][2] = makeCell(2, SPECIAL.LINE, ARM.UP);
+  board[3][2] = makeCell(3, SPECIAL.LINE, ARM.UP);
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  engine.setBoard(board);
+
+  // Union is a single UP arm from (2,2): (2,2),(1,2),(0,2). (3,2) is only cleared because it is consumed.
+  const frame = removeFrame(engine.swap({ r: 2, c: 2 }, { r: 3, c: 2 }));
+  assert.deepEqual(keys(frame.positions), ['0,2', '1,2', '2,2', '3,2']);
+});
+
+test('The same seed, board and swap produce identical frames', () => {
+  const make = () => {
+    const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 99 });
+    const board = cyclicBoard();
+    board[2][2] = makeCell(2, SPECIAL.LINE, ARMS_ALL);
+    board[2][3] = makeCell(3, SPECIAL.BOMB);
+    engine.setBoard(board);
+    return engine.swap({ r: 2, c: 2 }, { r: 2, c: 3 });
+  };
+  assert.equal(JSON.stringify(make().frames), JSON.stringify(make().frames));
 });
