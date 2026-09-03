@@ -78,3 +78,13 @@ Spec: `docs/superpowers/specs/2026-09-03-shapes-boards-cascades-design.md`, Part
 |---|----------|-----------|
 | D17 | L, T and plus matches make a beam gem placed on the intersection, carrying a 4-bit arm mask; the straight-five line gem is the two-opposite-arms case. `Cell.arms` is typed `Arms \| null` rather than the spec's optional `arms?: Arms`, since an explicit `null` on every non-line cell is what lets the validator reject arms on a cell that isn't a line gem. | Shapes had no identity (an L made the same bomb as a straight four) and the engine activated a `cross` direction nothing created. One arm model replaces three direction branches, and every combo is derived from `beamCells` instead of hand-written. |
 | D18 | Saved games are v2 and migrate v1 line directions to arm masks. | A game in progress should survive the upgrade; the validator still rejects any blob the engine could not run. |
+
+## 2.2 Lazy waves and hold-to-start (2026-09-03)
+
+Spec: `docs/superpowers/specs/2026-09-03-shapes-boards-cascades-design.md`, Part B.
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| D19 | A move's frames are a generator; each cascade wave is computed when the page pulls it, and the 50-wave cap is gone. The swap itself is applied eagerly so `moveValid` is known before the first frame. | The cap only existed because every wave was computed and stored up front (one 2-colour move once blocked the page for seven seconds and 2.4 GB). One wave of work per pull and one board of memory make an endless cascade cheap, and the design doc calls cascades the gift. |
+| D20 | New Game is a one-second hold with a ring that fills over the second; a plain-tap Start new game lives in the settings sheet. | With no cap, a stray tap could throw away minutes of watching. The hold is the guard; the sheet button keeps a no-hold path behind a deliberate step. |
+| D21 | Colours 2 and 3 join the sheet. | They were always reachable by URL; they are where the long cascades live, and the sheet should offer them. |

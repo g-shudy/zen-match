@@ -36,6 +36,7 @@ Read the full [Design Philosophy](docs/zen-match-design-philosophy.md).
   color the same beams.
 - **Chain reactions**: special gems caught in any explosion trigger automatically.
 - **No way to lose**: if the board runs out of moves it reshuffles itself.
+- **New Game is a hold**: press and keep pressing for a second, and a ring fills around the button. A stray tap never ends a game. Settings has a plain *Start new game* as well.
 
 The score in the corner is gentle feedback, not a target. Moves, points, average per move and the longest cascade are in Settings under *This game*.
 
@@ -43,7 +44,7 @@ The score in the corner is gentle feedback, not a target. Moves, points, average
 
 Behind the sliders icon:
 
-- **Board size** (6x6, 8x8, 10x10, 12x12) and **colors** (4 to 7). Changing either starts a new game; the button says so before it does.
+- **Board size** (6x6, 8x8, 10x10, 12x12) and **colors** (2 to 7). Changing either starts a new game; the button says so before it does.
 - **Palette**: Classic, Color-blind friendly, or High contrast. Every gem also carries its own shape, so matches stay readable in any palette.
 
 Settings and the current board are remembered, so closing the tab and coming back resumes the game where you left it.
@@ -59,9 +60,10 @@ The full range is available by link, beyond what the settings sheet offers:
 ?seed=42  Reproducible board (never resumes a saved game)
 ```
 
-Cascades are bounded: refills avoid creating immediate matches, and a single move
-resolves at most 50 cascade waves. At `?gems=2` that limit is reached routinely -
-one move can already be over a minute of animation.
+Cascades are not capped. Refills avoid creating immediate matches, but at two or three
+colors a single move can cascade for minutes, and it is allowed to. Waves are produced
+one at a time as they play, so the page stays responsive however long a chain runs; a
+held New Game ends it whenever you like.
 
 ## Tech
 
