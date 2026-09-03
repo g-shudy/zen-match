@@ -263,10 +263,10 @@ button {
 
 .score-value {
   display: inline-block;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   font-size: 1.55rem;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
   color: var(--text);
   transform-origin: right center;
 }
@@ -1241,6 +1241,7 @@ button {
 }
 
 .stats dd {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   font-size: 1.05rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;

@@ -199,6 +199,7 @@ function deviceAngle(): number {
 }
 
 const pose: { rotation: Rotation; visualRotation: number } = { rotation: 0, visualRotation: 0 };
+let turningTimeoutId = 0;
 
 function applyPose({ animate = true }: { animate?: boolean } = {}): void {
   const next = boardPose(deviceAngle(), settings.turns);
@@ -213,8 +214,9 @@ function applyPose({ animate = true }: { animate?: boolean } = {}): void {
   const turnMs = animate && !reducedMotion() ? config.timing.turn : 0;
   boardFrameEl.style.setProperty('--turn-ms', `${turnMs}ms`);
   if (turnMs > 0 && turned) {
+    window.clearTimeout(turningTimeoutId);
     boardFrameEl.classList.add('turning');
-    window.setTimeout(() => boardFrameEl.classList.remove('turning'), turnMs);
+    turningTimeoutId = window.setTimeout(() => boardFrameEl.classList.remove('turning'), turnMs);
   }
   boardEl.style.setProperty('--board-rotation', `${pose.visualRotation}deg`);
   boardEl.dataset.rotation = String(pose.rotation);
@@ -269,7 +271,7 @@ function applyPalette(palette: PaletteId): void {
 // Number formatting and the score display
 // ---------------------------------------------------------------------------
 
-const compactFormatter = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+const compactFormatter = new Intl.NumberFormat(undefined, { notation: 'compact', minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const standardFormatter = new Intl.NumberFormat(undefined);
 
 function formatNumber(n: number): string {
@@ -343,7 +345,7 @@ function isAdjacent(a: Pos, b: Pos): boolean {
 // Board geometry in board-local pixels, refreshed by updateBoardSizing. Every
 // effect and animation offset is computed from these, never from client rects:
 // the board element is rotated, so a screen rect would be in the wrong frame.
-const layout = { cell: 48, gap: 4, pad: 17 };
+const layout = { cell: 48, gap: 4, pad: 16 };
 
 function updateBoardSizing(): void {
   const narrow = window.innerWidth <= 480;
@@ -950,37 +952,42 @@ async function startNewGame(options: { transition?: boolean } = {}): Promise<voi
   // is on without pulling another, and trySwap's finally block clears the lock.
   // The lock is then held for the whole transition, so no swap can start against
   // the outgoing board while the dissolve plays; it is released at the very end,
-  // once the new board is up.
+  // once the new board is up. A throw anywhere in between must still release it,
+  // so the whole transition runs inside try/finally.
   gameState.runToken++;
   gameState.isProcessing = true;
   boardEl.classList.remove('processing');
-  boardEl.removeAttribute('aria-busy');
+  boardEl.setAttribute('aria-busy', 'true');
 
-  const transition = options.transition !== false && !reducedMotion() && gameState.currentBoard !== null;
-  if (transition) await dissolveBoard();
+  try {
+    const transition = options.transition !== false && !reducedMotion() && gameState.currentBoard !== null;
+    if (transition) await dissolveBoard();
 
-  let needsGridRebuild = false;
-  if (settings.gemTypes !== config.gemTypes) {
-    config.gemTypes = settings.gemTypes;
+    let needsGridRebuild = false;
+    if (settings.gemTypes !== config.gemTypes) {
+      config.gemTypes = settings.gemTypes;
+    }
+    if (settings.rows !== config.rows || settings.cols !== config.cols) {
+      config.rows = settings.rows;
+      config.cols = settings.cols;
+      needsGridRebuild = true;
+    }
+    syncUrl();
+
+    if (!config.seedLocked) config.seed = Date.now();
+    engine.reset({ rows: config.rows, cols: config.cols, gemTypes: config.gemTypes, seed: config.seed });
+
+    if (needsGridRebuild) createGrid();
+
+    const board = engine.init();
+    resetStats();
+    renderBoard(board);
+    saveGame();
+    reformBoard();
+  } finally {
+    boardEl.removeAttribute('aria-busy');
+    gameState.isProcessing = false;
   }
-  if (settings.rows !== config.rows || settings.cols !== config.cols) {
-    config.rows = settings.rows;
-    config.cols = settings.cols;
-    needsGridRebuild = true;
-  }
-  syncUrl();
-
-  if (!config.seedLocked) config.seed = Date.now();
-  engine.reset({ rows: config.rows, cols: config.cols, gemTypes: config.gemTypes, seed: config.seed });
-
-  if (needsGridRebuild) createGrid();
-
-  const board = engine.init();
-  resetStats();
-  renderBoard(board);
-  saveGame();
-  reformBoard();
-  gameState.isProcessing = false;
 }
 
 // Resume the last settled board when it matches the current settings. A seeded

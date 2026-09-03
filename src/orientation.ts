@@ -19,6 +19,8 @@ export const GRAVITY_BY_ROTATION: Record<Rotation, Gravity> = {
   270: 'left'
 };
 
+// Inputs are expected to already be a multiple of 90; Math.round here only
+// absorbs float noise from angle arithmetic, not arbitrary angles.
 export function normalizeRotation(deg: number): Rotation {
   const wrapped = ((Math.round(deg / 90) * 90) % 360 + 360) % 360;
   return wrapped as Rotation;
