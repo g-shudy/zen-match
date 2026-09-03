@@ -689,7 +689,10 @@ function cascadePace(combo: number): number {
   return Math.min(500, 350 * Math.pow(1.08, combo - 1)) / config.timing.remove;
 }
 
-async function playFrames(frames: Frame[], token: number): Promise<void> {
+// `frames` is a generator: each cascade wave is computed when the loop pulls it.
+// Leaving the loop early (a superseded move) closes the generator through the
+// for...of protocol, so the engine drops the wave it was holding.
+async function playFrames(frames: Iterable<Frame>, token: number): Promise<void> {
   let sawShuffle = false;
 
   for (const frame of frames) {
@@ -1138,7 +1141,7 @@ function wireSheet(sheet: HTMLDialogElement, onDismiss?: () => void): void {
 // Settings ------------------------------------------------------------------
 
 const SIZE_PRESETS = [6, 8, 10, 12];
-const COLOR_PRESETS = [4, 5, 6, 7];
+const COLOR_PRESETS = [2, 3, 4, 5, 6, 7];
 
 const pending = { gridSize: settings.gridSize, gemTypes: settings.gemTypes };
 
