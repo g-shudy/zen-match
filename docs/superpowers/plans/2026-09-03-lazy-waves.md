@@ -90,10 +90,10 @@ Delete the test `'Cascades stay bounded at the lowest gem count'` (and its comme
 // caller can stop pulling whenever it wants.
 test('Cascades are uncapped and produced lazily', () => {
   let longest = 0;
-  for (let seed = 0; seed < 10 && longest <= 60; seed++) {
+  for (let seed = 0; seed < 10 && longest <= 50; seed++) {
     const engine = new Engine({ rows: 16, cols: 16, gemTypes: 2, seed });
     engine.init();
-    for (let move = 0; move < 5 && longest <= 60; move++) {
+    for (let move = 0; move < 5 && longest <= 50; move++) {
       const m = engine.findValidMove();
       if (!m) break;
       const result = engine.swap({ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
@@ -102,12 +102,12 @@ test('Cascades are uncapped and produced lazily', () => {
       let waves = 0;
       for (const frame of result.frames) {
         if (frame.kind === 'remove') waves++;
-        if (waves > 60) break; // leaving the loop closes the generator
+        if (waves > 50) break; // leaving the loop closes the generator
       }
       longest = Math.max(longest, waves);
     }
   }
-  assert.ok(longest > 60, `expected a 16x16 two-colour move to run past 60 waves; longest seen ${longest}`);
+  assert.ok(longest > 50, `expected a 16x16 two-colour move to run past the old cap of 50 waves; longest seen ${longest}`);
 });
 
 test('pointsEarned accumulates exactly as frames are pulled', () => {
@@ -127,10 +127,11 @@ test('pointsEarned accumulates exactly as frames are pulled', () => {
   assert.equal(result.pointsEarned, sum);
 });
 
-test('An abandoned move leaves the board settled where the last pulled wave left it', () => {
+test('An abandoned move leaves the board hole-free where the last pulled wave left it, and the engine accepts the next move', () => {
   const engine = new Engine({ rows: 8, cols: 8, gemTypes: 2, seed: 5 });
   engine.init();
   const m = engine.findValidMove();
+  assert.ok(m, 'fixture must have a legal move');
   const result = engine.swap({ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
   let pulled = 0;
   for (const frame of result.frames) {
@@ -156,9 +157,13 @@ In `src/engine/index.ts` replace `export interface ResolveResult { ... }` with:
 
 ```ts
 export interface MoveResult {
-  // Produced one cascade wave at a time as the caller pulls them; the engine holds
-  // at most one wave. Leaving a for...of early closes the generator, and the board
-  // stays as the last pulled wave left it.
+  // The swap itself is applied when swap() returns, so validity is known at once.
+  // Frames are then produced one cascade wave at a time as the caller pulls them;
+  // the engine holds at most one wave. Leaving a for...of early closes the
+  // generator and the board stays exactly as the last pulled wave left it, which
+  // may include live matches (or, before the first frame, an un-reverted invalid
+  // swap). A caller that stops early must reset the engine or drain the move
+  // before calling swap() again; the page does the former on New Game.
   frames: IterableIterator<Frame>;
   // Accumulates as frames are pulled; final once the iterator is exhausted.
   readonly pointsEarned: number;

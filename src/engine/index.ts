@@ -114,9 +114,13 @@ export type Frame =
   | { kind: 'shuffle'; board: Board; attempt: number; moves?: GemMove[] };
 
 export interface MoveResult {
-  // Produced one cascade wave at a time as the caller pulls them; the engine holds
-  // at most one wave. Leaving a for...of early closes the generator, and the board
-  // stays as the last pulled wave left it.
+  // The swap itself is applied when swap() returns, so validity is known at once.
+  // Frames are then produced one cascade wave at a time as the caller pulls them;
+  // the engine holds at most one wave. Leaving a for...of early closes the
+  // generator and the board stays exactly as the last pulled wave left it, which
+  // may include live matches (or, before the first frame, an un-reverted invalid
+  // swap). A caller that stops early must reset the engine or drain the move
+  // before calling swap() again; the page does the former on New Game.
   frames: IterableIterator<Frame>;
   // Accumulates as frames are pulled; final once the iterator is exhausted.
   readonly pointsEarned: number;
