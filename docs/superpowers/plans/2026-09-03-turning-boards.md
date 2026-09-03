@@ -1068,7 +1068,15 @@ function renderBoard(board: Board): void {
 
 Import the `Cell` type from the engine if it is not already imported. In `createGrid`, reset the cache: `renderedKeys = [];` next to `cells.length = 0;`.
 
-Note: transient classes that other code adds to a gem element (`falling`, `touching`, `matched`, `exploding`, `line-cleared`, `rainbow-cleared`, `just-created`, `pending-match`, `dissolve`, `reform`, `invalid`, `activating`) are cleared today by `renderBoard` rewriting `className` on every frame. With diffing, a gem whose key did not change keeps such a class. Audit each: the removal animations are always followed by a `board` frame that changes the cell (it becomes empty or a new gem), `falling` is removed by `animateGemMoves` itself, `dissolve`/`reform` are removed by their timers, `touching`/`invalid`/`activating`/`pending-match`/`just-created` are removed by the code that adds them. If any is only ever cleared by the full rewrite, clear it explicitly where it is added, and say so in the report.
+Note: transient classes that other code adds to a gem element (`falling`, `touching`, `matched`, `exploding`, `line-cleared`, `rainbow-cleared`, `just-created`, `pending-match`, `dissolve`, `reform`, `invalid`, `activating`) are cleared today by `renderBoard` rewriting `className` on every frame. With diffing, a gem whose key did not change keeps such a class. `falling` is removed by `animateGemMoves` itself, `dissolve`/`reform` by their timers, and `touching`/`invalid`/`activating`/`pending-match`/`just-created` by the code that adds them.
+
+The removal classes are the exception. `matched`, `exploding`, `line-cleared` and `rainbow-cleared` end at opacity 0 with `forwards`, and nothing but a rewrite clears them - but the cell they sit on does not always change. The engine can re-place a special on the square it was just matched on (a bomb swapped into the bottom row to complete a straight four of its own type), and a new game can replace the whole board while a remove frame is on screen; either way the key is identical and the gem stays invisible. So the `remove` case of `playFrames` forgets those cells before it animates them:
+
+```ts
+for (const pos of frame.positions) renderedKeys[posIdx(pos.r, pos.c)] = '';
+```
+
+`cellKey` never returns the empty string, so the next render rewrites those elements whatever they hold. Sub-step positions are part of `frame.positions`, so the chain-reaction victims are covered too, and `dissolveBoard` is untouched: it adds and removes `dissolve` itself without going through the renderer.
 
 - [ ] **Step 2: Typecheck, test, and measure**
 

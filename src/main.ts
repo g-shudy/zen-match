@@ -792,6 +792,16 @@ async function playFrames(frames: Iterable<Frame>, token: number): Promise<void>
       }
 
       case 'remove': {
+        // These gems are about to take a removal class that ends at opacity 0
+        // and holds there. The renderer skips any element whose key is
+        // unchanged, so an identical cell landing back on the same square - a
+        // special re-placed where it was, or a whole new board arriving
+        // mid-frame - would keep that class and stay invisible. Forgetting the
+        // key makes the next render rewrite these elements whatever they hold.
+        // Sub-step positions are part of `frame.positions`, so this covers the
+        // chain-reaction victims too.
+        for (const pos of frame.positions) renderedKeys[posIdx(pos.r, pos.c)] = '';
+
         const pace = cascadePace(frame.score.combo);
         gameState.pendingPoints += frame.score.points;
         gameState.maxCombo = Math.max(gameState.maxCombo, frame.score.combo);
