@@ -158,6 +158,14 @@ test('parseSavedGame rejects anything that does not fit the current board', () =
   armsOnBomb.board[0][0] = { type: 0, special: 'bomb', arms: 3 };
   assert.equal(parseSavedGame(JSON.stringify(armsOnBomb), expect), null, 'arms on a non-beam gem');
 
+  const propeller = JSON.parse(json);
+  propeller.board[0][0] = { type: 0, special: 'propeller', arms: null };
+  assert.ok(parseSavedGame(JSON.stringify(propeller), expect), 'a propeller with no arms loads');
+
+  const propellerArms = JSON.parse(json);
+  propellerArms.board[0][0] = { type: 0, special: 'propeller', arms: 3 };
+  assert.equal(parseSavedGame(JSON.stringify(propellerArms), expect), null, 'arms on a propeller');
+
   const negative = JSON.parse(json);
   negative.points = -5;
   assert.equal(parseSavedGame(JSON.stringify(negative), expect), null, 'negative points');

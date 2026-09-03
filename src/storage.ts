@@ -130,7 +130,7 @@ export function serializeGame(game: GameSnapshot, now: number = Date.now()): str
   return JSON.stringify(saved);
 }
 
-const SPECIALS = new Set<unknown>([null, 'bomb', 'line', 'rainbow']);
+const SPECIALS = new Set<unknown>([null, 'bomb', 'line', 'rainbow', 'propeller']);
 
 // v1 stored a line gem's direction; v2 stores an arm mask (UP 1, RIGHT 2, DOWN 4, LEFT 8).
 // A Map rather than an object literal, so a direction like "constructor" cannot

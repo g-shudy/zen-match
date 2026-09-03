@@ -43,11 +43,11 @@
 ### Task 1: Squares are matches
 
 **Files:**
-- Modify: `src/engine/index.ts` (`SPECIAL` ~1-6, `MatchGroup` ~132-138, `pickNonMatchingType` ~253-270, `findMatches` ~704-822, ladder in `cascadeWaves` ~992-1011, `specialPriority` ~1053, `wouldMatchAt` ~1168-1178), `index.html` (legend, before the Rainbow entry), `src/main.ts` (`renderBoard`, after the rainbow branch), `src/styles.css` (glyph, after the rainbow glyph rules, plus the reduced-motion selector list)
-- Test: `tests/engine.test.js`
+- Modify: `src/engine/index.ts` (`SPECIAL` ~1-6, `MatchGroup` ~132-138, `pickNonMatchingType` ~253-270, `findMatches` ~704-822, ladder in `cascadeWaves` ~992-1011, `specialPriority` ~1053, `wouldMatchAt` ~1168-1178), `index.html` (legend, before the Rainbow entry), `src/main.ts` (`renderBoard`, after the rainbow branch), `src/styles.css` (glyph, after the rainbow glyph rules, plus the reduced-motion selector list), `src/storage.ts` (`SPECIALS` ~133)
+- Test: `tests/engine.test.js`, `tests/storage.test.js`
 
 **Interfaces:**
-- Produces: `SPECIAL.PROPELLER = 'propeller'` (so `Special` includes it), `MatchGroup.square: Pos | null` (the anchor of the first square in the group), propellers placed by the ladder with bonus 75, the `special-propeller` class and its glyph, and the legend entry (brought forward from Tasks 3 and 4 so `tests/help-legend.test.js`'s structural check never sees a `SPECIAL` value it can't find a sample for). Task 2 adds the propeller's behaviour; Task 3 adds its flight animation.
+- Produces: `SPECIAL.PROPELLER = 'propeller'` (so `Special` includes it), `MatchGroup.square: Pos | null` (the anchor of the first square in the group), propellers placed by the ladder with bonus 75, the `special-propeller` class and its glyph, the legend entry, and `'propeller'` accepted by `parseSavedGame` (all four brought forward from Tasks 3 and 4 so a structural test or a saved game never sees a `SPECIAL` value it can't handle). Task 2 adds the propeller's behaviour; Task 3 adds its flight animation.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -282,10 +282,28 @@ In the reduced-motion block, next to the other special glyph animations, add `.g
 
 Task 3 still adds its own `.gem.flown`/`.gem.flying` rules after these when it builds the flight animation; only the glyph and the legend sample move here.
 
-- [ ] **Step 5: Run the tests, the typecheck and the whole suite**
+- [ ] **Step 5: Saved games accept the propeller**
+
+Without this, `isCell`'s `SPECIALS` set rejects a saved board holding a propeller and the whole game is silently dropped on reload — a save/load hole left open the moment `PROPELLER` exists. Bring it forward from Task 3 Step 1.
+
+Add to `tests/storage.test.js`, next to the arms-rejection cases in `'parseSavedGame rejects anything that does not fit the current board'`:
+
+```js
+  const propeller = JSON.parse(json);
+  propeller.board[0][0] = { type: 0, special: 'propeller', arms: null };
+  assert.ok(parseSavedGame(JSON.stringify(propeller), expect), 'a propeller with no arms loads');
+
+  const propellerArms = JSON.parse(json);
+  propellerArms.board[0][0] = { type: 0, special: 'propeller', arms: 3 };
+  assert.equal(parseSavedGame(JSON.stringify(propellerArms), expect), null, 'arms on a propeller');
+```
+
+Run `node build.mjs --test && node --test tests/storage.test.js` and see the first assertion fail; then in `src/storage.ts` change `SPECIALS` to `new Set<unknown>([null, 'bomb', 'line', 'rainbow', 'propeller'])`, and see it pass. `isCell`'s arms rule already treats every non-`'line'` special generically (arms must be `null`), so this one line is the whole fix — the second assertion passes without further changes.
+
+- [ ] **Step 6: Run the tests, the typecheck and the whole suite**
 
 Run: `node build.mjs --test && node --test tests/engine.test.js && npm run typecheck && npm test`
-Expected: 51 engine tests pass; typecheck clean; 79 total, all green including `tests/help-legend.test.js`. Watch the pre-existing `'init produces a settled, playable board'` and `'Refill does not manufacture immediate matches'` tests: they now also demand square-free boards. If either fails (two colours on 16x16 is the stress case), do not weaken it; report NEEDS_CONTEXT with the failing sizes and seeds.
+Expected: 51 engine tests pass; typecheck clean; 79 total, all green including `tests/help-legend.test.js` and `tests/storage.test.js`. Watch the pre-existing `'init produces a settled, playable board'` and `'Refill does not manufacture immediate matches'` tests: they now also demand square-free boards. If either fails (two colours on 16x16 is the stress case), do not weaken it; report NEEDS_CONTEXT with the failing sizes and seeds.
 
 Two other pre-existing tests can be caught out by the same RNG-stream shift (the refill guard now rejects one more candidate per cell, so every draw after the first rejection differs from before) even though they don't touch squares themselves:
 - `'A swap whose only match is a square is judged legal'`'s fixture (above) has a second, incidental valid move if written as a bare `findValidMove` coordinate check instead of asserting on the intended swap directly — column 2 already holds colour 0 two rows apart, and a swap between them makes a plain vertical 3-run before row-major scan order ever reaches the square swap. Assert on `play(...).moveValid` and the placed special, not on `findValidMove`'s exact return value, as Step 1 now does.
@@ -298,7 +316,7 @@ Two other pre-existing tests can be caught out by the same RNG-stream shift (the
   assert.equal(again.moveValid, true, 'the engine accepts a legal move on the abandoned board');
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/engine/index.ts tests/engine.test.js index.html src/main.ts src/styles.css
@@ -311,6 +329,19 @@ predicate learn the square windows so a refill never hands one out. The
 legend entry and glyph land now too, so the structural test never sees a
 SPECIAL value it can't show a sample for. The propeller's flight behaviour
 follows in the next task.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+- [ ] **Step 8: Commit the storage fix**
+
+```bash
+git add src/storage.ts tests/storage.test.js
+git commit -m "Accept a propeller in saved games
+
+The validator listed the specials it would load and the new one was not
+among them, so a game holding a propeller would have been dropped on
+reload. Pulled forward from the page task so no task leaves a save unloadable.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -632,33 +663,18 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: Storage, glyph and the flight on the page
+### Task 3: The propeller's flight, on the page
 
 **Files:**
-- Modify: `src/storage.ts` (`SPECIALS` ~133), `src/main.ts` (`showEffects` ~612-628, `playSubSteps` ~755-772, the `remove` case ~815-850), `src/styles.css` (flight classes after the propeller glyph rules Task 1 added, removal animations ~634-671, reduced motion ~1440+)
-- Test: `tests/storage.test.js`
+- Modify: `src/main.ts` (`showEffects` ~612-628, `playSubSteps` ~755-772, the `remove` case ~815-850), `src/styles.css` (flight classes after the propeller glyph rules Task 1 added, removal animations ~634-671, reduced motion ~1440+)
 
 **Interfaces:**
 - Consumes: `flight` effects, `layout`, `cellCenter`, `reducedMotion`, `gems`, `posIdx`, the `special-propeller` class and glyph Task 1 added (a flying clone inherits it via `cloneNode`).
 - Produces: the `flown`/`flying` animation classes; `playFlights(effects): Promise<void>`.
 
-- [ ] **Step 1: Storage**
+Saved games accepting a propeller (`src/storage.ts`'s `SPECIALS`) moved to Task 1 Step 5 — a save/load hole was not something to leave open until this task landed. Task 3 now has no dedicated unit-test step of its own; Step 3's Playwright walk is its verification.
 
-Add to `tests/storage.test.js`, next to the arms-rejection cases:
-
-```js
-  const propeller = JSON.parse(json);
-  propeller.board[0][0] = { type: 0, special: 'propeller', arms: null };
-  assert.ok(parseSavedGame(JSON.stringify(propeller), expect), 'a propeller with no arms loads');
-
-  const propellerArms = JSON.parse(json);
-  propellerArms.board[0][0] = { type: 0, special: 'propeller', arms: 3 };
-  assert.equal(parseSavedGame(JSON.stringify(propellerArms), expect), null, 'arms on a propeller');
-```
-
-Run `node build.mjs --test && node --test tests/storage.test.js` and see the first assertion fail; then in `src/storage.ts` change `SPECIALS` to `new Set<unknown>([null, 'bomb', 'line', 'rainbow', 'propeller'])`, and see it pass.
-
-- [ ] **Step 2: Flight classes**
+- [ ] **Step 1: Flight classes**
 
 The `special-propeller` glyph and its legend entry already exist (Task 1 brought them forward so the structural test never went red). This step only adds the classes the flight animation drives.
 
@@ -679,7 +695,7 @@ In `src/styles.css`, after the propeller glyph rules add:
 }
 ```
 
-- [ ] **Step 3: Flights on the page**
+- [ ] **Step 2: Flights on the page**
 
 In `src/main.ts` add, near `showEffects`:
 
@@ -744,10 +760,10 @@ Sequencing. Chain flights belong to a sub-step and must play after that sub-step
 - In `playSubSteps`, after the `substepTrigger` sleep and before the classes are applied, insert `await playFlights(step.effects);`.
 - In the `remove` case, compute once `const subStepEffects = new Set<Effect>(frame.subSteps?.flatMap(s => s.effects) ?? []);` and `const ownFlights = frame.effects.filter(e => !subStepEffects.has(e));`. In the no-sub-step branch insert `await playFlights(ownFlights);` before `applyRemovalAnimations(frame.positions, frame.animations)`; in the sub-step branch insert the same line before the initial `applyRemovalAnimations(initialPositions, ...)`.
 
-- [ ] **Step 4: Typecheck, test, and walk**
+- [ ] **Step 3: Typecheck, test, and walk**
 
 Run: `npm run typecheck && npm test`
-Expected: clean; 85 tests (the storage additions are assertions inside an existing test).
+Expected: clean; 85 tests.
 
 Build and serve; with the Playwright MCP at 1280x800:
 1. Craft a saved game (v2, 8x8, gemTypes 5, cyclic non-matching fill `((r + c) % 3) + 1`) with a propeller of type 0 at (1,1), type 0 at (0,1) and (2,0), the rest cyclic; inject into `localStorage['zen-match:game']`, reload; the gem at row 1, column 1 shows the pinwheel (screenshot).
@@ -755,17 +771,16 @@ Build and serve; with the Playwright MCP at 1280x800:
 3. Emulate reduced motion if the run_code tool allows (`page.emulateMedia({ reducedMotion: 'reduce' })`): the same swap produces no `.flying` element and the board settles.
 4. 390x844 quick check of the pinwheel legibility.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add src/storage.ts src/main.ts src/styles.css tests/storage.test.js
+git add src/main.ts src/styles.css
 git commit -m "Draw the propeller and fly it to its landing
 
 A pinwheel overlay marks the propeller. When it goes off, a copy of the
 gem crosses the board to the centre of its landing block over a duration
 that scales with the distance, then the landing pops; the original fades
-at once. Reduced motion skips the flight. Saved games accept the new
-special with no arms.
+at once. Reduced motion skips the flight.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
