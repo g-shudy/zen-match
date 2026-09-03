@@ -22,6 +22,7 @@ Read the full [Design Philosophy](docs/zen-match-design-philosophy.md).
 ## Playing
 
 - **Swap** two neighbouring gems to line up three or more of a color. Drag a gem onto its neighbour, or tap one and then the other. On a keyboard, arrow keys move between gems and Enter or Space selects.
+- **The board is glued to your phone.** Turn the phone and the board turns with it; new gems fall from whichever edge is up. The Turn button (or R) adds a quarter turn, which is how to invert on an iPhone and the only way to turn on a desktop; the turn is remembered.
 - **Cascades settle** rather than accelerate: each wave of a chain is a little slower than the last, so a long chain is something to watch.
 - **Special gems**, by the size and shape of the matched group:
   - **Bomb**: a straight 4 - clears a 3x3 area
@@ -44,7 +45,7 @@ The score in the corner is gentle feedback, not a target. Moves, points, average
 
 Behind the sliders icon:
 
-- **Board size** (6x6, 8x8, 10x10, 12x12) and **colors** (2 to 7). Changing either starts a new game; the button says so before it does.
+- **Size** (the short side: 6, 8, 10, 12, 16, 24) and **Shape** (Square or Tall, half again as long). **Colors** 2 to 7. Changing any of these starts a new game; the button says so before it does.
 - **Palette**: Classic, Color-blind friendly, or High contrast. Every gem also carries its own shape, so matches stay readable in any palette.
 
 Settings and the current board are remembered, so closing the tab and coming back resumes the game where you left it.
@@ -56,7 +57,7 @@ The full range is available by link, beyond what the settings sheet offers:
 ```
 ?gems=4   Fewer colors, longer cascades (2-10, default 5)
 ?gems=10  Rare matches
-?grid=12  Bigger board (4-16, default 8)
+?grid=8x12   Any rectangle, each side 4 to 40 (a bare number is a square)
 ?seed=42  Reproducible board (never resumes a saved game)
 ```
 

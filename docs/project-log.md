@@ -88,3 +88,15 @@ Spec: `docs/superpowers/specs/2026-09-03-shapes-boards-cascades-design.md`, Part
 | D19 | A move's frames are a generator; each cascade wave is computed when the page pulls it, and the 50-wave cap is gone. The swap itself is applied eagerly so `moveValid` is known before the first frame. | The cap only existed because every wave was computed and stored up front (one 2-colour move once blocked the page for seven seconds and 2.4 GB). One wave of work per pull and one board of memory make an endless cascade cheap, and the design doc calls cascades the gift. |
 | D20 | New Game is a one-second hold with a ring that fills over the second; a plain-tap Start new game lives in the settings sheet. | With no cap, a stray tap could throw away minutes of watching. The hold is the guard; the sheet button keeps a no-hold path behind a deliberate step. |
 | D21 | Colours 2 and 3 join the sheet. | They were always reachable by URL; they are where the long cascades live, and the sheet should offer them. |
+
+## 2.3 Turning boards (2026-09-03)
+
+Spec: `docs/superpowers/specs/2026-09-03-shapes-boards-cascades-design.md`, Part C.
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| D22 | The board is a rectangle glued to the device body; `cols` is the short side, `rows` the long side, and it renders unrotated at zero turns on every device, so a Tall board on a desktop is upright until turned. | One frame of reference everywhere; the turn count persists, so a desktop player turns once. |
+| D23 | Gravity is a four-way engine parameter read at the start of each wave; drop and fill run along fall lines from the landing edge inward, so `'down'` reproduces 2.2 exactly. | A physical toy: gems fall toward the ground, whichever board edge that is. |
+| D24 | The pose comes from `screen.orientation.angle` plus manual turns through one pure function with a 16-case truth table; the sign is confirmed on an iPhone before release. | Platforms disagree on the API's sign; a single place to correct. |
+| D25 | Effects, falls and drags are computed in board-local coordinates from cell indices. | A translate applied inside a rotated element is rotated with it; client rects lie. |
+| D26 | Sides go to 40 by URL and 24 in the sheet; the render diffs. | Big boards are for tablets and desktops; the toy still works small. |

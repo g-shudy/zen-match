@@ -154,6 +154,7 @@ const turnBtn = getEl<HTMLButtonElement>('turnBtn');
 const settingsSheet = getEl<HTMLDialogElement>('settingsSheet');
 const helpSheet = getEl<HTMLDialogElement>('helpSheet');
 const sizeSeg = getEl<HTMLDivElement>('sizeSeg');
+const shapeSeg = getEl<HTMLDivElement>('shapeSeg');
 const colorsSeg = getEl<HTMLDivElement>('colorsSeg');
 const settingsDone = getEl<HTMLButtonElement>('settingsDone');
 const settingsNewGame = getEl<HTMLButtonElement>('settingsNewGame');
@@ -1229,8 +1230,23 @@ function wireSheet(sheet: HTMLDialogElement, onDismiss?: () => void): void {
 
 // Settings ------------------------------------------------------------------
 
-const SIZE_PRESETS = [6, 8, 10, 12];
+const SIZE_PRESETS = [6, 8, 10, 12, 16, 24];
 const COLOR_PRESETS = [2, 3, 4, 5, 6, 7];
+
+// The board is a rectangle glued to the device: cols is the short side, rows the
+// long one. Tall multiplies the short side by 1.5, rounded; Square keeps them
+// equal. A rectangle from the URL that is neither is treated as Square until the
+// player changes something.
+type Shape = 'square' | 'tall';
+function tallRows(short: number): number {
+  return Math.round(short * 1.5);
+}
+function shapeOf(cols: number, rows: number): Shape {
+  return rows === tallRows(cols) ? 'tall' : 'square';
+}
+function currentShape(): Shape {
+  return shapeSeg.querySelector<HTMLInputElement>('input:checked')?.value === 'tall' ? 'tall' : 'square';
+}
 
 const pending = { cols: settings.cols, rows: settings.rows, gemTypes: settings.gemTypes };
 
@@ -1243,8 +1259,19 @@ function renderSegments(container: HTMLElement, name: string, presets: number[],
     .join('');
 }
 
+function renderShape(container: HTMLElement, current: Shape): void {
+  const options: Array<{ value: Shape; label: string }> = [
+    { value: 'square', label: 'Square' },
+    { value: 'tall', label: 'Tall' }
+  ];
+  container.innerHTML = options
+    .map(o => `<label><input type="radio" name="shape" value="${o.value}"${o.value === current ? ' checked' : ''}><span>${o.label}</span></label>`)
+    .join('');
+}
+
 function syncSettingsUI(): void {
-  renderSegments(sizeSeg, 'size', SIZE_PRESETS, pending.cols, v => `${v}×${v}`);
+  renderSegments(sizeSeg, 'size', SIZE_PRESETS, pending.cols, v => String(v));
+  renderShape(shapeSeg, shapeOf(pending.cols, pending.rows));
   renderSegments(colorsSeg, 'colors', COLOR_PRESETS, pending.gemTypes, v => String(v));
   updateApplyState();
   updateStats();
@@ -1264,7 +1291,15 @@ function revertPending(): void {
 
 sizeSeg.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
-  pending.cols = pending.rows = Number(input.value);
+  const v = Number(input.value);
+  pending.cols = v;
+  pending.rows = currentShape() === 'tall' ? tallRows(v) : v;
+  updateApplyState();
+});
+
+shapeSeg.addEventListener('change', event => {
+  const input = event.target as HTMLInputElement;
+  pending.rows = input.value === 'tall' ? tallRows(pending.cols) : pending.cols;
   updateApplyState();
 });
 
