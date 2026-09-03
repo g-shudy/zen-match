@@ -69,3 +69,12 @@ professional app, not just the UI but the user experience." Delivered as a singl
 Tech debt closed: TD1 (fonts now preconnect + swap), TD3 (JS reads gem colours from CSS custom
 properties; swatch previews reuse the same variables), TD4 (landscape-phone layout moves the rail
 beside the board), I1/I2 superseded by the pointer-capture handling kept from 1.x.
+
+## 2.1 Arm gems (2026-09-03)
+
+Spec: `docs/superpowers/specs/2026-09-03-shapes-boards-cascades-design.md`, Part A.
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| D17 | L, T and plus matches make a beam gem placed on the intersection, carrying a 4-bit arm mask; the straight-five line gem is the two-opposite-arms case. | Shapes had no identity (an L made the same bomb as a straight four) and the engine activated a `cross` direction nothing created. One arm model replaces three direction branches, and every combo is derived from `beamCells` instead of hand-written. |
+| D18 | Saved games are v2 and migrate v1 line directions to arm masks. | A game in progress should survive the upgrade; the validator still rejects any blob the engine could not run. |

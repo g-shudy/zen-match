@@ -24,12 +24,16 @@ Read the full [Design Philosophy](docs/zen-match-design-philosophy.md).
 - **Swap** two neighbouring gems to line up three or more of a color. Drag a gem onto its neighbour, or tap one and then the other. On a keyboard, arrow keys move between gems and Enter or Space selects.
 - **Cascades settle** rather than accelerate: each wave of a chain is a little slower than the last, so a long chain is something to watch.
 - **Special gems**, by the size and shape of the matched group:
-  - **Bomb**: a 4-match, or a T/L shape of 5 cells - clears a 3x3 area
-  - **Line** (straight 5-match): clears its entire row or column
-  - **Rainbow** (any connected group of 6+): clears every gem of one color when swapped
+  - **Bomb**: a straight 4 - clears a 3x3 area
+  - **Line**: a straight 5 - fires a beam each way along its line, to the edge
+  - **Corner**, **Tee**, **Cross**: an L, T or plus of 5 - one beam along each leg, from the cell where the legs meet
+  - **Rainbow**: any connected group of 6+ - clears every gem of one color when swapped
 
   Groups are counted by connected cells, not run length - two 3-matches that touch
-  form a group of 6 and make a Rainbow. Swapping two specials together combines them.
+  form a group of 6 and make a Rainbow. Swapping two specials together combines them:
+  two beam gems fire every arm either had (two lines make a cross), a bomb with a beam
+  gem fires each beam three wide, and a rainbow with a beam gem gives every gem of that
+  color the same beams.
 - **Chain reactions**: special gems caught in any explosion trigger automatically.
 - **No way to lose**: if the board runs out of moves it reshuffles itself.
 

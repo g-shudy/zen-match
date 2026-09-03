@@ -178,11 +178,23 @@
           <ul class="legend">
             <li>
               <span class="gem gem-1 sample special-bomb" aria-hidden="true"><span class="gem-shape shape-1"></span></span>
-              <span class="legend-text"><strong>Bomb</strong>Four in a row, or a T or L of five. Clears a 3&times;3 area when it goes off.</span>
+              <span class="legend-text"><strong>Bomb</strong>Four in a row. Clears a 3&times;3 area when it goes off.</span>
             </li>
             <li>
-              <span class="gem gem-0 sample special-line horizontal" aria-hidden="true"><span class="gem-shape shape-0"></span></span>
-              <span class="legend-text"><strong>Line</strong>Five in a row. Clears its whole row or column.</span>
+              <span class="gem gem-0 sample special-line arm-left arm-right" aria-hidden="true"><span class="gem-shape shape-0"></span></span>
+              <span class="legend-text"><strong>Line</strong>Five in a row. Fires a beam each way along its line, to the edge of the board.</span>
+            </li>
+            <li>
+              <span class="gem gem-3 sample special-line arm-right arm-down" aria-hidden="true"><span class="gem-shape shape-3"></span></span>
+              <span class="legend-text"><strong>Corner</strong>An L of five. Sits where the legs meet and fires a beam along each of them.</span>
+            </li>
+            <li>
+              <span class="gem gem-4 sample special-line arm-left arm-right arm-down" aria-hidden="true"><span class="gem-shape shape-4"></span></span>
+              <span class="legend-text"><strong>Tee</strong>A T of five. Three beams: both ways along the bar and down the stem.</span>
+            </li>
+            <li>
+              <span class="gem gem-1 sample special-line arm-up arm-right arm-down arm-left" aria-hidden="true"><span class="gem-shape shape-1"></span></span>
+              <span class="legend-text"><strong>Cross</strong>A plus of five, which only a cascade can make. Fires all four ways at once.</span>
             </li>
             <li>
               <span class="gem gem-2 sample special-rainbow" aria-hidden="true"><span class="gem-shape shape-2"></span></span>
@@ -193,7 +205,7 @@
 
         <section class="group">
           <h3 class="group-title">Combining specials</h3>
-          <p>Swap two special gems together for something bigger. Two bombs make a wider blast, two lines clear a full cross, and a rainbow with a bomb sets off every gem of that color.</p>
+          <p>Swap two special gems together for something bigger. Two beam gems fire every arm either of them had, so two lines make a cross. A bomb with a beam gem fires each beam three wide. A rainbow with a beam gem gives every gem of that color the same beams, and they all fire. Two bombs make a wider blast, and a rainbow with a bomb sets off every gem of that color.</p>
         </section>
 
         <section class="group">
