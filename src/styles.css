@@ -1141,6 +1141,16 @@ button {
   outline-offset: 2px;
 }
 
+/* Tall is disabled at the largest sizes, where the long side would pass the
+   clamp and the two shapes are the same board. */
+.seg input:disabled {
+  cursor: default;
+}
+
+.seg input:disabled + span {
+  opacity: 0.35;
+}
+
 /* Palette cards */
 .palettes {
   display: grid;

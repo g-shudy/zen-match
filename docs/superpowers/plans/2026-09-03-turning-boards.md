@@ -1126,15 +1126,22 @@ In `src/main.ts`:
 ```ts
 type Shape = 'square' | 'tall';
 function tallRows(short: number): number {
-  return Math.round(short * 1.5);
+  // The long side obeys the same clamp as the short one. Past that point Tall
+  // and Square are the same board, and the Shape control disables Tall.
+  return Math.min(LIMITS.grid.max, Math.round(short * 1.5));
+}
+function tallIsPossible(cols: number): boolean {
+  return tallRows(cols) > cols;
 }
 function shapeOf(cols: number, rows: number): Shape {
-  return rows === tallRows(cols) ? 'tall' : 'square';
+  return rows !== cols && rows === tallRows(cols) ? 'tall' : 'square';
 }
 ```
 
-- `pending` gains nothing; `syncSettingsUI` renders the size segment from `pending.cols` and a shape segment: `renderShape(shapeSeg, shapeOf(pending.cols, pending.rows))` where `renderShape` writes two radios (`square` labelled "Square", `tall` labelled "Tall") in the same markup `renderSegments` uses. A rectangle from the URL that is neither square nor tall shows as Square with the size segment carrying its `cols`, and stays untouched until the player changes something.
-- Handlers: the size change sets `pending.cols = v` and `pending.rows = shape === 'tall' ? tallRows(v) : v` using the current shape radio; the shape change recomputes `pending.rows` from `pending.cols`.
+Without the clamp a size of 40 would build a 40x60 board, write `?grid=40x60`, and lose the saved game on the next load, when settings clamp back to 40x40 and the board no longer matches.
+
+- `pending` gains nothing; `syncSettingsUI` renders the size segment from `pending.cols` and calls `syncShapeUI()`, which is `renderShape(shapeSeg, shapeOf(pending.cols, pending.rows), !tallIsPossible(pending.cols))`. `renderShape` writes two radios (`square` labelled "Square", `tall` labelled "Tall") in the same markup `renderSegments` uses, and puts `disabled` on the Tall input when Tall is impossible; `.seg input:disabled + span` dims it. A rectangle from the URL that is neither square nor tall shows as Square with the size segment carrying its `cols`, and stays untouched until the player changes something.
+- Handlers: the size change sets `pending.cols = v` and `pending.rows = shape === 'tall' ? tallRows(v) : v` using the current shape radio, then calls `syncShapeUI()` - at a size where Tall is impossible the rows come back equal to the cols, so the radio disables itself and the shape reads back as Square. The shape change recomputes `pending.rows` from `pending.cols`.
 
 - [ ] **Step 2: Docs, help, log, version**
 

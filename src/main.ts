@@ -1249,10 +1249,15 @@ const COLOR_PRESETS = [2, 3, 4, 5, 6, 7];
 // player changes something.
 type Shape = 'square' | 'tall';
 function tallRows(short: number): number {
-  return Math.round(short * 1.5);
+  // The long side obeys the same clamp as the short one. Past that point Tall
+  // and Square are the same board, and the Shape control disables Tall.
+  return Math.min(LIMITS.grid.max, Math.round(short * 1.5));
+}
+function tallIsPossible(cols: number): boolean {
+  return tallRows(cols) > cols;
 }
 function shapeOf(cols: number, rows: number): Shape {
-  return rows === tallRows(cols) ? 'tall' : 'square';
+  return rows !== cols && rows === tallRows(cols) ? 'tall' : 'square';
 }
 function currentShape(): Shape {
   return shapeSeg.querySelector<HTMLInputElement>('input:checked')?.value === 'tall' ? 'tall' : 'square';
@@ -1269,19 +1274,26 @@ function renderSegments(container: HTMLElement, name: string, presets: number[],
     .join('');
 }
 
-function renderShape(container: HTMLElement, current: Shape): void {
-  const options: Array<{ value: Shape; label: string }> = [
-    { value: 'square', label: 'Square' },
-    { value: 'tall', label: 'Tall' }
+function renderShape(container: HTMLElement, current: Shape, tallDisabled: boolean): void {
+  const options: Array<{ value: Shape; label: string; disabled: boolean }> = [
+    { value: 'square', label: 'Square', disabled: false },
+    { value: 'tall', label: 'Tall', disabled: tallDisabled }
   ];
   container.innerHTML = options
-    .map(o => `<label><input type="radio" name="shape" value="${o.value}"${o.value === current ? ' checked' : ''}><span>${o.label}</span></label>`)
+    .map(
+      o =>
+        `<label><input type="radio" name="shape" value="${o.value}"${o.value === current ? ' checked' : ''}${o.disabled ? ' disabled' : ''}><span>${o.label}</span></label>`
+    )
     .join('');
+}
+
+function syncShapeUI(): void {
+  renderShape(shapeSeg, shapeOf(pending.cols, pending.rows), !tallIsPossible(pending.cols));
 }
 
 function syncSettingsUI(): void {
   renderSegments(sizeSeg, 'size', SIZE_PRESETS, pending.cols, v => String(v));
-  renderShape(shapeSeg, shapeOf(pending.cols, pending.rows));
+  syncShapeUI();
   renderSegments(colorsSeg, 'colors', COLOR_PRESETS, pending.gemTypes, v => String(v));
   updateApplyState();
   updateStats();
@@ -1304,6 +1316,9 @@ sizeSeg.addEventListener('change', event => {
   const v = Number(input.value);
   pending.cols = v;
   pending.rows = currentShape() === 'tall' ? tallRows(v) : v;
+  // At a size where the long side would pass the clamp, Tall is the square
+  // board. Re-rendering disables the radio and reads the shape back as Square.
+  syncShapeUI();
   updateApplyState();
 });
 
