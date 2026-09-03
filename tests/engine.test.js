@@ -845,3 +845,88 @@ test('Gravity is read at the start of each wave, so a turn mid-cascade changes w
   }
   assert.ok(proved, 'a two-colour move should cascade at least two waves within 20 seeds');
 });
+
+// --- Squares ----------------------------------------------------------------
+
+test('A 2x2 of one colour is a match and makes a propeller on the swapped cell', () => {
+  // The cyclic board has no runs and no squares. Three 0s sit at (1,1), (1,2), (2,1);
+  // swapping (3,2) up into (2,2) completes the square.
+  const board = cyclicBoard();
+  board[1][1] = makeCell(0);
+  board[1][2] = makeCell(0);
+  board[2][1] = makeCell(0);
+  board[3][2] = makeCell(0);
+  assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
+
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  engine.setBoard(board);
+  const result = play(engine, { r: 3, c: 2 }, { r: 2, c: 2 });
+  const { pos, gem } = placedSpecial(result);
+  assert.deepEqual(pos, { r: 2, c: 2 }, 'the swapped cell lies in the square');
+  assert.equal(gem.special, SPECIAL.PROPELLER);
+  assert.equal(gem.arms, null);
+  const remove = removeFrame(result);
+  assert.equal(remove.score.breakdown.matchBonus, 75 + 1 * 20, 'propeller bonus plus the length bonus');
+});
+
+test('findMatches reports a square as a group of four with its anchor', () => {
+  const board = cyclicBoard();
+  for (const [r, c] of [[1, 1], [1, 2], [2, 1], [2, 2]]) board[r][c] = makeCell(0);
+  const groups = findMatches(board, 5, 5);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].positions.length, 4);
+  assert.deepEqual(groups[0].square, { r: 1, c: 1 });
+  assert.equal(groups[0].intersection, null);
+});
+
+test('A 2x3 block is six cells and makes a rainbow', () => {
+  const board = cyclicBoard();
+  for (const [r, c] of [[1, 1], [1, 2], [1, 3], [2, 1], [2, 2], [2, 3]]) board[r][c] = makeCell(0);
+  const groups = findMatches(board, 5, 5);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].positions.length, 6);
+
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  engine.setBoard(board);
+  const { gem } = placedSpecial(play(engine, { r: 0, c: 0 }, { r: 0, c: 1 }));
+  assert.equal(gem.special, SPECIAL.RAINBOW, 'six or more is a rainbow whatever its shape');
+});
+
+test('A square sharing two cells with a 3-run is five cells without an intersection and makes a propeller', () => {
+  const board = cyclicBoard();
+  for (const [r, c] of [[1, 1], [1, 2], [1, 3], [2, 1], [2, 2]]) board[r][c] = makeCell(0);
+  const groups = findMatches(board, 5, 5);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].positions.length, 5);
+  assert.equal(groups[0].intersection, null, 'no vertical run of three, so no intersection');
+  assert.deepEqual(groups[0].square, { r: 1, c: 1 });
+
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  engine.setBoard(board);
+  const { gem } = placedSpecial(play(engine, { r: 0, c: 0 }, { r: 0, c: 1 }));
+  assert.equal(gem.special, SPECIAL.PROPELLER);
+});
+
+test('A trial swap that only completes a square is a legal move', () => {
+  const board = cyclicBoard();
+  board[1][1] = makeCell(0);
+  board[1][2] = makeCell(0);
+  board[2][1] = makeCell(0);
+  board[3][2] = makeCell(0);
+  assert.equal(hasValidMoves(board, 5, 5), true);
+  assert.deepEqual(findValidMove(board, 5, 5), { r1: 2, c1: 2, r2: 3, c2: 2 }, 'the only legal move completes the square');
+});
+
+test('The refill guard never completes a square with the three cells already placed', () => {
+  // (0,0), (0,1) and (1,0) are colour 0; the cell at (1,1) is filled last under
+  // 'down' and must never come out 0, whatever the seed.
+  for (let seed = 0; seed < 40; seed++) {
+    const board = [
+      [makeCell(0), makeCell(0), makeCell(1)],
+      [makeCell(0), null, makeCell(0)],
+      [makeCell(1), makeCell(0), makeCell(1)]
+    ];
+    fillGems(board, 3, 3, 2, new RNG(seed), 'down');
+    assert.equal(board[1][1].type, 1, `seed ${seed}: the guard must refuse the square`);
+  }
+});

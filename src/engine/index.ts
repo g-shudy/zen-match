@@ -2,7 +2,8 @@ export const SPECIAL = {
   NONE: null,
   BOMB: 'bomb',
   LINE: 'line',
-  RAINBOW: 'rainbow'
+  RAINBOW: 'rainbow',
+  PROPELLER: 'propeller'
 } as const;
 
 export type Special = typeof SPECIAL[keyof typeof SPECIAL];
@@ -159,6 +160,7 @@ interface MatchGroup {
   direction: 'horizontal' | 'vertical' | 'both';
   type: number;
   intersection: Pos | null; // the cell shared by a horizontal and a vertical run, when there is one
+  square: Pos | null; // anchor (top-left) of the first 2x2 in the group
 }
 
 export function cloneBoard(board: Board): Board {
@@ -243,7 +245,8 @@ function createEmptyBoard(rows: number, cols: number): Board {
 }
 
 // Pick a gem type that does not immediately complete a 3-run with cells already
-// placed. Fill order runs from the entry edge inward, so "already placed" means
+// placed, or the three cells that would close a 2x2 with this one. Fill order
+// runs from the entry edge inward, so "already placed" means
 // the two cells behind this one along its line (toward the entry edge, opposite
 // the fall) and the two beside it in the lines done earlier (the column to the
 // left for vertical gravity, the row above for horizontal). Under 'down' this is
@@ -255,6 +258,9 @@ function pickNonMatchingType(board: Board, r: number, c: number, gemTypes: numbe
   const vertical = step.dc === 0;
   const behind = (k: number): number | undefined => board[r - k * step.dr]?.[c - k * step.dc]?.type;
   const beside = (k: number): number | undefined => (vertical ? board[r]?.[c - k] : board[r - k]?.[c])?.type;
+  // The cell that closes a 2x2 with `behind` and `beside`: already placed too.
+  const diagonal = (): number | undefined =>
+    board[r - step.dr - (vertical ? 0 : 1)]?.[c - step.dc - (vertical ? 1 : 0)]?.type;
   let type = 0;
   let attempts = 0;
   do {
@@ -262,7 +268,8 @@ function pickNonMatchingType(board: Board, r: number, c: number, gemTypes: numbe
     attempts++;
   } while (
     attempts < 50 &&
-    ((behind(1) === type && behind(2) === type) || (beside(1) === type && beside(2) === type))
+    ((behind(1) === type && behind(2) === type) || (beside(1) === type && beside(2) === type) ||
+      (behind(1) === type && beside(1) === type && diagonal() === type))
   );
   return type;
 }
@@ -702,7 +709,7 @@ function armsOf(cell: Cell | null | undefined): Arms {
 }
 
 export function findMatches(board: Board, rows: number, cols: number): MatchGroup[] {
-  const matchedCells = new Map<string, { r: number; c: number; type: number; direction: 'horizontal' | 'vertical'; isComplex?: boolean }>();
+  const matchedCells = new Map<string, { r: number; c: number; type: number; direction: 'horizontal' | 'vertical' | 'square'; isComplex?: boolean; square?: Pos }>();
 
   for (let r = 0; r < rows; r++) {
     let c = 0;
@@ -758,6 +765,26 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
     }
   }
 
+  // A 2x2 of one colour is a match in its own right. Its cells join the same
+  // map, so a square touching a run of its colour floods into one group.
+  for (let r = 0; r + 1 < rows; r++) {
+    for (let c = 0; c + 1 < cols; c++) {
+      const cell = board[r][c];
+      if (!cell) continue;
+      const type = cell.type;
+      if (board[r][c + 1]?.type !== type || board[r + 1][c]?.type !== type || board[r + 1][c + 1]?.type !== type) continue;
+      for (const [i, j] of [[r, c], [r, c + 1], [r + 1, c], [r + 1, c + 1]]) {
+        const key = keyFor(i, j);
+        const existing = matchedCells.get(key);
+        if (existing) {
+          existing.square = existing.square ?? { r, c };
+        } else {
+          matchedCells.set(key, { r: i, c: j, type, direction: 'square', square: { r, c } });
+        }
+      }
+    }
+  }
+
   if (matchedCells.size === 0) return [];
 
   const matches: MatchGroup[] = [];
@@ -769,6 +796,7 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
     const match: Pos[] = [];
     const queue = [key];
     let intersection: Pos | null = null;
+    let square: Pos | null = null;
     let hDir = false;
     let vDir = false;
 
@@ -784,6 +812,7 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
       if (cellData.isComplex && !intersection) {
         intersection = { r: cellData.r, c: cellData.c };
       }
+      if (cellData.square && !square) square = cellData.square;
       if (cellData.direction === 'horizontal') hDir = true;
       if (cellData.direction === 'vertical') vDir = true;
 
@@ -809,7 +838,8 @@ export function findMatches(board: Board, rows: number, cols: number): MatchGrou
       effectiveLen: match.length,
       direction: hDir && vDir ? 'both' : (hDir ? 'horizontal' : 'vertical'),
       type: data.type,
-      intersection
+      intersection,
+      square
     });
   }
 
@@ -989,7 +1019,8 @@ function* cascadeWaves(state: EngineState, tally: Tally): Generator<Frame, void,
       const len = match.effectiveLen || match.positions.length;
       const type = match.type;
 
-      // Phase 3B: len >= 6 -> RAINBOW; a 5-cell L/T/plus (isComplex, has an intersection) -> beam gem
+      // Phase 3B: len >= 6 -> RAINBOW; a 5-cell L/T/plus (isComplex, has an intersection) -> beam
+      // gem; a group with a square and no intersection -> propeller; a straight 5 -> beam gem
       if (len >= 6) {
         const pos = findBestSpecialPosition(match, state.lastSwapPos, comboCount);
         specials.push({ pos, type, special: SPECIAL.RAINBOW });
@@ -998,6 +1029,14 @@ function* cascadeWaves(state: EngineState, tally: Tally): Generator<Frame, void,
         // L, T or plus: the gem sits where the legs meet and fires along each of them.
         specials.push({ pos: match.intersection, type, special: SPECIAL.LINE, arms: armsFromIntersection(match) });
         matchBonus += 150;
+      } else if (match.square) {
+        // A 2x2 (possibly touching a run): the propeller sits on the swapped cell
+        // when that lies in the square, else on the square cell nearest the centre.
+        const a = match.square;
+        const squareCells: Pos[] = [{ r: a.r, c: a.c }, { r: a.r, c: a.c + 1 }, { r: a.r + 1, c: a.c }, { r: a.r + 1, c: a.c + 1 }];
+        const pos = findBestSpecialPosition({ ...match, positions: squareCells }, state.lastSwapPos, comboCount);
+        specials.push({ pos, type, special: SPECIAL.PROPELLER });
+        matchBonus += 75;
       } else if (len === 5) {
         const pos = findBestSpecialPosition(match, state.lastSwapPos, comboCount);
         const arms = match.direction === 'horizontal' ? ARMS_HORIZONTAL : ARMS_VERTICAL;
@@ -1050,7 +1089,7 @@ function* cascadeWaves(state: EngineState, tally: Tally): Generator<Frame, void,
 
     removePositions(board, toRemove);
 
-    const specialPriority: Record<string, number> = { [SPECIAL.RAINBOW]: 3, [SPECIAL.LINE]: 2, [SPECIAL.BOMB]: 1 };
+    const specialPriority: Record<string, number> = { [SPECIAL.RAINBOW]: 4, [SPECIAL.LINE]: 3, [SPECIAL.PROPELLER]: 2, [SPECIAL.BOMB]: 1 };
     specials.sort((a, b) => (specialPriority[b.special ?? ''] ?? 0) - (specialPriority[a.special ?? ''] ?? 0));
 
     const usedPositions = new Set<string>();
@@ -1174,7 +1213,26 @@ function wouldMatchAt(board: Board, r: number, c: number, type: number, rows: nu
   run = 1;
   for (let i = r - 1; i >= 0 && board[i][c]?.type === type; i--) run++;
   for (let i = r + 1; i < rows && board[i][c]?.type === type; i++) run++;
-  return run >= 3;
+  if (run >= 3) return true;
+
+  // A 2x2 of one colour is a match too: check the four windows that contain (r, c).
+  for (const [dr, dc] of [[-1, -1], [-1, 0], [0, -1], [0, 0]]) {
+    const r0 = r + dr;
+    const c0 = c + dc;
+    if (r0 < 0 || c0 < 0 || r0 + 1 >= rows || c0 + 1 >= cols) continue;
+    let all = true;
+    for (let i = r0; i <= r0 + 1 && all; i++) {
+      for (let j = c0; j <= c0 + 1; j++) {
+        if (i === r && j === c) continue;
+        if (board[i][j]?.type !== type) {
+          all = false;
+          break;
+        }
+      }
+    }
+    if (all) return true;
+  }
+  return false;
 }
 
 // Clear any matches sitting on a freshly generated board, silently: no frames, no
