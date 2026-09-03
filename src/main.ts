@@ -789,6 +789,9 @@ async function playFrames(frames: Iterable<Frame>, token: number): Promise<void>
       default:
         break;
     }
+
+    // Re-check after the awaits: a superseded loop must never pull another frame.
+    if (token !== gameState.runToken) return;
   }
 
   if (sawShuffle) hideToast();
@@ -874,10 +877,13 @@ function reformBoard(): void {
 }
 
 async function startNewGame(options: { transition?: boolean } = {}): Promise<void> {
-  // Supersede any in-flight move: playFrames bails out at its next frame and
-  // trySwap's finally block clears the lock. Belt and braces below.
+  // Supersede any in-flight move: playFrames bails out at the end of the frame it
+  // is on without pulling another, and trySwap's finally block clears the lock.
+  // The lock is then held for the whole transition, so no swap can start against
+  // the outgoing board while the dissolve plays; it is released at the very end,
+  // once the new board is up.
   gameState.runToken++;
-  gameState.isProcessing = false;
+  gameState.isProcessing = true;
   boardEl.classList.remove('processing');
   boardEl.removeAttribute('aria-busy');
 
@@ -906,6 +912,7 @@ async function startNewGame(options: { transition?: boolean } = {}): Promise<voi
   renderBoard(board);
   saveGame();
   reformBoard();
+  gameState.isProcessing = false;
 }
 
 // Resume the last settled board when it matches the current settings. A seeded

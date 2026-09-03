@@ -118,9 +118,10 @@ export interface MoveResult {
   // Frames are then produced one cascade wave at a time as the caller pulls them;
   // the engine holds at most one wave. Leaving a for...of early closes the
   // generator and the board stays exactly as the last pulled wave left it, which
-  // may include live matches (or, before the first frame, an un-reverted invalid
-  // swap). A caller that stops early must reset the engine or drain the move
-  // before calling swap() again; the page does the former on New Game.
+  // may include live matches (or, until the board frame that follows an invalid
+  // frame, an un-reverted invalid swap). A caller that stops early must reset the
+  // engine or drain the move before calling swap() again on the same game; after
+  // reset() the abandoned move only ever touches the state it started with.
   frames: IterableIterator<Frame>;
   // Accumulates as frames are pulled; final once the iterator is exhausted.
   readonly pointsEarned: number;
@@ -262,12 +263,14 @@ export class Engine {
   }
 
   reset(config: Partial<EngineConfig> = {}): void {
-    if (typeof config.rows === 'number') this.state.rows = config.rows;
-    if (typeof config.cols === 'number') this.state.cols = config.cols;
-    if (typeof config.gemTypes === 'number') this.state.gemTypes = config.gemTypes;
-    if (typeof config.seed === 'number') this.state.rng = new RNG(config.seed);
-    this.state.board = createEmptyBoard(this.state.rows, this.state.cols);
-    this.state.lastSwapPos = null;
+    const prev = this.state;
+    const rows = typeof config.rows === 'number' ? config.rows : prev.rows;
+    const cols = typeof config.cols === 'number' ? config.cols : prev.cols;
+    const gemTypes = typeof config.gemTypes === 'number' ? config.gemTypes : prev.gemTypes;
+    const rng = typeof config.seed === 'number' ? new RNG(config.seed) : prev.rng;
+    // A fresh object: a generator left over from an abandoned move keeps the old
+    // state and can never touch the board of the game that replaced it.
+    this.state = { rows, cols, gemTypes, board: createEmptyBoard(rows, cols), rng, lastSwapPos: null };
   }
 
   init(): Board {
@@ -309,14 +312,18 @@ export class Engine {
   }
 
   swap(pos1: Pos, pos2: Pos): MoveResult {
-    const { rows, cols, board } = this.state;
+    // Bind the state this move owns. reset() installs a fresh object, so a move
+    // abandoned mid-flight keeps working on the board it started on, never on the
+    // game that replaced it.
+    const state = this.state;
+    const { rows, cols, board } = state;
     const tally: Tally = { points: 0 };
 
     if (!board[pos1.r]?.[pos1.c] || !board[pos2.r]?.[pos2.c]) {
       return { frames: (function* (): Generator<Frame, void, undefined> {})(), pointsEarned: 0, moveValid: false };
     }
 
-    this.state.lastSwapPos = { r1: pos1.r, c1: pos1.c, r2: pos2.r, c2: pos2.c };
+    state.lastSwapPos = { r1: pos1.r, c1: pos1.c, r2: pos2.r, c2: pos2.c };
 
     const gem1 = board[pos1.r][pos1.c];
     const gem2 = board[pos2.r][pos2.c];
@@ -328,7 +335,7 @@ export class Engine {
     const rainbowSwap = isRainbow(gem1) || isRainbow(gem2);
     const moveValid = bothAreSpecial || rainbowSwap || findMatches(board, rows, cols).length > 0;
 
-    const frames = this.resolveMove(pos1, pos2, gem1, gem2, moveValid, tally);
+    const frames = this.resolveMove(state, pos1, pos2, gem1, gem2, moveValid, tally);
     return {
       frames,
       get pointsEarned() {
@@ -338,7 +345,10 @@ export class Engine {
     };
   }
 
+  // `state` is the state the move was made against, not `this.state`: an abandoned
+  // move must never write to the board of the game that replaced it.
   private *resolveMove(
+    state: EngineState,
     pos1: Pos,
     pos2: Pos,
     gem1: Cell | null,
@@ -346,7 +356,7 @@ export class Engine {
     moveValid: boolean,
     tally: Tally
   ): Generator<Frame, void, undefined> {
-    const { rows, cols, board } = this.state;
+    const { rows, cols, board } = state;
 
     yield { kind: 'swap', board: cloneBoard(board) };
 
@@ -354,8 +364,8 @@ export class Engine {
       yield { kind: 'invalid', positions: [pos1, pos2] };
       [board[pos1.r][pos1.c], board[pos2.r][pos2.c]] = [board[pos2.r][pos2.c], board[pos1.r][pos1.c]];
       yield { kind: 'board', board: cloneBoard(board) };
-      yield* rescueDeadBoard(this.state, tally);
-      this.state.lastSwapPos = null;
+      yield* rescueDeadBoard(state, tally);
+      state.lastSwapPos = null;
       return;
     }
 
@@ -541,7 +551,7 @@ export class Engine {
       const dropMoves = dropGems(board, rows, cols);
       if (dropMoves.length > 0) yield { kind: 'drop', board: cloneBoard(board), moves: dropMoves };
 
-      const fillMoves = fillGems(board, rows, cols, this.state.gemTypes, this.state.rng);
+      const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng);
       if (fillMoves.length > 0) yield { kind: 'fill', board: cloneBoard(board), moves: fillMoves };
     } else if (gem1Special === SPECIAL.RAINBOW || gem2Special === SPECIAL.RAINBOW) {
       const gem1IsRainbow = gem1Special === SPECIAL.RAINBOW;
@@ -601,16 +611,16 @@ export class Engine {
       const dropMoves = dropGems(board, rows, cols);
       if (dropMoves.length > 0) yield { kind: 'drop', board: cloneBoard(board), moves: dropMoves };
 
-      const fillMoves = fillGems(board, rows, cols, this.state.gemTypes, this.state.rng);
+      const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng);
       if (fillMoves.length > 0) yield { kind: 'fill', board: cloneBoard(board), moves: fillMoves };
     }
 
     // Every valid move ends the same way: cascade until the board settles, then
     // reshuffle if it settled with no legal move left.
-    yield* cascadeWaves(this.state, tally);
-    if (!hasValidMoves(board, rows, cols)) yield* shuffleWaves(this.state, 0, tally);
+    yield* cascadeWaves(state, tally);
+    if (!hasValidMoves(board, rows, cols)) yield* shuffleWaves(state, 0, tally);
 
-    this.state.lastSwapPos = null;
+    state.lastSwapPos = null;
   }
 
   hasValidMoves(): boolean {

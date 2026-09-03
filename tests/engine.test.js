@@ -346,7 +346,7 @@ test('An abandoned move leaves the board hole-free where the last pulled wave le
   const board = engine.state.board;
   assert.ok(board.every(row => row.every(cell => cell !== null)), 'no holes after a fill frame');
   const again = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
-  assert.equal(typeof again.frames.next, 'function', 'the engine accepts a new move after an abandoned one');
+  assert.equal(typeof again.moveValid, 'boolean', 'the engine judges the next move against the abandoned board');
 });
 
 test('Refill does not manufacture immediate matches', () => {
@@ -733,4 +733,29 @@ test('A beam gem that reaches the engine without arms fires as a horizontal line
   combo.setBoard(comboBoard);
   const comboFrame = removeFrame(play(combo, { r: 2, c: 2 }, { r: 2, c: 3 }));
   assert.deepEqual(keys(comboFrame.positions), ['2,0', '2,1', '2,2', '2,3', '2,4']);
+});
+
+test('An abandoned move cannot touch the game that replaced it', () => {
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  engine.init();
+  const m = engine.findValidMove();
+  assert.ok(m, 'fixture must have a legal move');
+  const old = engine.swap({ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
+  old.frames.next(); // pull only the swap frame, then abandon the move mid-flight
+
+  engine.reset({ seed: 9 });
+  // A board with a live match that the abandoned move must not clear.
+  const planted = [
+    [0, 0, 0, 1, 2],
+    [1, 2, 3, 2, 1],
+    [2, 3, 1, 3, 2],
+    [3, 1, 2, 1, 3],
+    [1, 2, 3, 2, 1]
+  ].map(row => row.map(t => makeCell(t)));
+  engine.setBoard(planted);
+
+  for (const _frame of old.frames) { /* drain the abandoned move */ }
+
+  assert.deepEqual(engine.state.board, planted, 'the abandoned move must only ever touch its own state');
+  assert.equal(engine.state.lastSwapPos, null);
 });

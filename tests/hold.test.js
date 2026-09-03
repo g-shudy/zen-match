@@ -94,3 +94,12 @@ test('a new hold can start after one completed', () => {
   timers.advance(1000);
   assert.equal(calls.complete, 2);
 });
+
+test('releasing after completion is a no-op', () => {
+  const { timers, calls, hold } = harness();
+  hold.press();
+  timers.advance(1000);
+  hold.release();
+  assert.equal(calls.complete, 1);
+  assert.equal(calls.cancel, 0, 'the trailing pointerup after a completed hold must not cancel anything');
+});

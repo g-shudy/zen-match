@@ -161,9 +161,10 @@ export interface MoveResult {
   // Frames are then produced one cascade wave at a time as the caller pulls them;
   // the engine holds at most one wave. Leaving a for...of early closes the
   // generator and the board stays exactly as the last pulled wave left it, which
-  // may include live matches (or, before the first frame, an un-reverted invalid
-  // swap). A caller that stops early must reset the engine or drain the move
-  // before calling swap() again; the page does the former on New Game.
+  // may include live matches (or, until the board frame that follows an invalid
+  // frame, an un-reverted invalid swap). A caller that stops early must reset the
+  // engine or drain the move before calling swap() again on the same game; after
+  // reset() the abandoned move only ever touches the state it started with.
   frames: IterableIterator<Frame>;
   // Accumulates as frames are pulled; final once the iterator is exhausted.
   readonly pointsEarned: number;
@@ -253,14 +254,18 @@ Replace the whole `swap` method with the version below. The two combo blocks (`b
 
 ```ts
   swap(pos1: Pos, pos2: Pos): MoveResult {
-    const { rows, cols, board } = this.state;
+    // Bind the state this move owns. reset() installs a fresh object, so a move
+    // abandoned mid-flight keeps working on the board it started on, never on the
+    // game that replaced it.
+    const state = this.state;
+    const { rows, cols, board } = state;
     const tally: Tally = { points: 0 };
 
     if (!board[pos1.r]?.[pos1.c] || !board[pos2.r]?.[pos2.c]) {
       return { frames: (function* (): Generator<Frame, void, undefined> {})(), pointsEarned: 0, moveValid: false };
     }
 
-    this.state.lastSwapPos = { r1: pos1.r, c1: pos1.c, r2: pos2.r, c2: pos2.c };
+    state.lastSwapPos = { r1: pos1.r, c1: pos1.c, r2: pos2.r, c2: pos2.c };
 
     const gem1 = board[pos1.r][pos1.c];
     const gem2 = board[pos2.r][pos2.c];
@@ -272,7 +277,7 @@ Replace the whole `swap` method with the version below. The two combo blocks (`b
     const rainbowSwap = isRainbow(gem1) || isRainbow(gem2);
     const moveValid = bothAreSpecial || rainbowSwap || findMatches(board, rows, cols).length > 0;
 
-    const frames = this.resolveMove(pos1, pos2, gem1, gem2, moveValid, tally);
+    const frames = this.resolveMove(state, pos1, pos2, gem1, gem2, moveValid, tally);
     return {
       frames,
       get pointsEarned() {
@@ -282,7 +287,10 @@ Replace the whole `swap` method with the version below. The two combo blocks (`b
     };
   }
 
+  // `state` is the state the move was made against, not `this.state`: an abandoned
+  // move must never write to the board of the game that replaced it.
   private *resolveMove(
+    state: EngineState,
     pos1: Pos,
     pos2: Pos,
     gem1: Cell | null,
@@ -290,7 +298,7 @@ Replace the whole `swap` method with the version below. The two combo blocks (`b
     moveValid: boolean,
     tally: Tally
   ): Generator<Frame, void, undefined> {
-    const { rows, cols, board } = this.state;
+    const { rows, cols, board } = state;
 
     yield { kind: 'swap', board: cloneBoard(board) };
 
@@ -298,8 +306,8 @@ Replace the whole `swap` method with the version below. The two combo blocks (`b
       yield { kind: 'invalid', positions: [pos1, pos2] };
       [board[pos1.r][pos1.c], board[pos2.r][pos2.c]] = [board[pos2.r][pos2.c], board[pos1.r][pos1.c]];
       yield { kind: 'board', board: cloneBoard(board) };
-      yield* rescueDeadBoard(this.state, tally);
-      this.state.lastSwapPos = null;
+      yield* rescueDeadBoard(state, tally);
+      state.lastSwapPos = null;
       return;
     }
 
@@ -333,7 +341,7 @@ Replace the whole `swap` method with the version below. The two combo blocks (`b
       const dropMoves = dropGems(board, rows, cols);
       if (dropMoves.length > 0) yield { kind: 'drop', board: cloneBoard(board), moves: dropMoves };
 
-      const fillMoves = fillGems(board, rows, cols, this.state.gemTypes, this.state.rng);
+      const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng);
       if (fillMoves.length > 0) yield { kind: 'fill', board: cloneBoard(board), moves: fillMoves };
     } else if (gem1Special === SPECIAL.RAINBOW || gem2Special === SPECIAL.RAINBOW) {
       // (existing body: targetType/rainbowPos/toRemove/.../activateSpecialsInRemovalSet, unchanged)
@@ -360,16 +368,16 @@ Replace the whole `swap` method with the version below. The two combo blocks (`b
       const dropMoves = dropGems(board, rows, cols);
       if (dropMoves.length > 0) yield { kind: 'drop', board: cloneBoard(board), moves: dropMoves };
 
-      const fillMoves = fillGems(board, rows, cols, this.state.gemTypes, this.state.rng);
+      const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng);
       if (fillMoves.length > 0) yield { kind: 'fill', board: cloneBoard(board), moves: fillMoves };
     }
 
     // Every valid move ends the same way: cascade until the board settles, then
     // reshuffle if it settled with no legal move left.
-    yield* cascadeWaves(this.state, tally);
-    if (!hasValidMoves(board, rows, cols)) yield* shuffleWaves(this.state, 0, tally);
+    yield* cascadeWaves(state, tally);
+    if (!hasValidMoves(board, rows, cols)) yield* shuffleWaves(state, 0, tally);
 
-    this.state.lastSwapPos = null;
+    state.lastSwapPos = null;
   }
 ```
 
@@ -425,7 +433,16 @@ Change the signature to `async function playFrames(frames: Iterable<Frame>, toke
 // for...of protocol, so the engine drops the wave it was holding.
 ```
 
-No other change: `for (const frame of frames)` and the token check already do the right thing.
+Keep `for (const frame of frames)` and the token check at the top of the body, and add a
+second check at the bottom of the body, after the `switch`:
+
+```ts
+    // Re-check after the awaits: a superseded loop must never pull another frame.
+    if (token !== gameState.runToken) return;
+```
+
+The top check alone is not enough. `for...of` pulls the next frame before the body runs, so a
+loop superseded during an await would compute one more wave before bailing out.
 
 - [ ] **Step 2: Expose colours 2 and 3**
 
