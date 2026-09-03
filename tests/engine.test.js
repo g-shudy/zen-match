@@ -480,3 +480,15 @@ test('beamCells: constants agree with the bit layout', () => {
   assert.equal(ARMS_VERTICAL, ARM.UP | ARM.DOWN);
   assert.equal(ARMS_ALL, 15);
 });
+
+test('beamCells: a widened arm blocked at the edge still clears the cells beside the origin', () => {
+  const { cells, effects } = beamCells({ r: 2, c: 4 }, ARM.RIGHT, 5, 5, 1);
+  assert.deepEqual(keys(cells), ['1,4', '2,4', '3,4']);
+  assert.equal(effects.length, 0, 'nothing to sweep');
+});
+
+test('beamCells: a corner gem with both arms off the board keeps its three-wide neighbours', () => {
+  const { cells, effects } = beamCells({ r: 4, c: 4 }, ARM.RIGHT | ARM.DOWN, 5, 5, 1);
+  assert.deepEqual(keys(cells), ['3,4', '4,3', '4,4']);
+  assert.equal(effects.length, 0);
+});

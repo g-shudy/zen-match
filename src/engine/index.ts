@@ -170,7 +170,7 @@ export interface BeamResult {
 // Each arm runs from the gem to the board edge. `halfWidth` widens every arm
 // symmetrically (1 makes it three cells wide, the bomb + beam combo). The origin is
 // always included so the result is the full footprint; an arm that points straight
-// off the board contributes no cells and no effect.
+// off the board draws no sweep and adds nothing beyond the widened cells beside the origin.
 export function beamCells(origin: Pos, arms: Arms, rows: number, cols: number, halfWidth = 0): BeamResult {
   const seen = new Set<string>();
   const cells: Pos[] = [];
@@ -193,9 +193,13 @@ export function beamCells(origin: Pos, arms: Arms, rows: number, cols: number, h
       const r0 = origin.r + (step.dr === 0 ? w : 0);
       const c0 = origin.c + (step.dc === 0 ? w : 0);
       if (!inBounds(r0, c0)) continue;
+      // The widened footprint beside the origin belongs to the arm even when the arm
+      // has nowhere to go, so a three-wide beam at the board edge still clears the
+      // cells next to the gem.
+      push(r0, c0);
       if (!inBounds(r0 + step.dr, c0 + step.dc)) continue; // zero-length: nothing to sweep
       effects.push({ kind: 'beam', from: { r: r0, c: c0 }, dir: step.dir });
-      for (let k = 0; inBounds(r0 + step.dr * k, c0 + step.dc * k); k++) {
+      for (let k = 1; inBounds(r0 + step.dr * k, c0 + step.dc * k); k++) {
         push(r0 + step.dr * k, c0 + step.dc * k);
       }
     }
