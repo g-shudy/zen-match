@@ -18,6 +18,14 @@ function makeCell(type, special = SPECIAL.NONE, arms = null) {
   return { type, special, arms };
 }
 
+// The engine hands frames out lazily, one cascade wave at a time. Tests want the
+// whole move, so materialise it here; draining also settles the engine's board.
+function play(engine, pos1, pos2) {
+  const result = engine.swap(pos1, pos2);
+  const frames = Array.from(result.frames);
+  return { frames, pointsEarned: result.pointsEarned, moveValid: result.moveValid };
+}
+
 test('RNG is deterministic for a seed', () => {
   const rng1 = new RNG(123456);
   const rng2 = new RNG(123456);
@@ -45,7 +53,7 @@ test('Swap that creates a match yields points', () => {
   ];
 
   engine.setBoard(board);
-  const result = engine.swap({ r: 0, c: 1 }, { r: 1, c: 1 });
+  const result = play(engine, { r: 0, c: 1 }, { r: 1, c: 1 });
 
   assert.equal(result.moveValid, true);
   assert.ok(result.pointsEarned > 0);
@@ -61,7 +69,7 @@ test('Drop and fill frames include movement metadata for falling animation', () 
   ];
 
   engine.setBoard(board);
-  const result = engine.swap({ r: 2, c: 2 }, { r: 3, c: 2 });
+  const result = play(engine, { r: 2, c: 2 }, { r: 3, c: 2 });
 
   const dropFrame = result.frames.find(frame => frame.kind === 'drop');
   const fillFrame = result.frames.find(frame => frame.kind === 'fill');
@@ -108,7 +116,7 @@ test('Straight 5 makes a Line beam gem on the swapped cell with both arms along 
   assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
 
   engine.setBoard(board);
-  const result = engine.swap({ r: 1, c: 2 }, { r: 2, c: 2 });
+  const result = play(engine, { r: 1, c: 2 }, { r: 2, c: 2 });
 
   const placed = result.frames.find(f => f.kind === 'board' && f.newSpecials);
   assert.ok(placed, 'a special must be placed');
@@ -151,7 +159,7 @@ test('Rainbow + Normal swap clears only swapped color', () => {
   ];
 
   engine.setBoard(board);
-  const result = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
+  const result = play(engine, { r: 0, c: 0 }, { r: 0, c: 1 });
 
   assert.equal(result.moveValid, true);
   assert.ok(result.pointsEarned > 0);
@@ -181,7 +189,7 @@ test('Cascade special placement does not use swap position', () => {
   // Just verify the engine can process matches without errors
   const move = engine.findValidMove();
   if (move) {
-    const result = engine.swap(
+    const result = play(engine,
       { r: move.r1, c: move.c1 },
       { r: move.r2, c: move.c2 }
     );
@@ -205,7 +213,7 @@ test('Dead board is rescued by a shuffle on an invalid swap', () => {
 
   const engine = new Engine({ rows: 4, cols: 4, gemTypes: 4, seed: 7 });
   engine.setBoard(rows);
-  const result = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
+  const result = play(engine, { r: 0, c: 0 }, { r: 0, c: 1 });
 
   const shuffle = result.frames.find(f => f.kind === 'shuffle');
   assert.ok(shuffle, 'a dead board must trigger a shuffle instead of silently soft-locking');
@@ -222,7 +230,7 @@ test('Shuffle records real motion for the slide animation', () => {
 
   const engine = new Engine({ rows: 4, cols: 4, gemTypes: 4, seed: 7 });
   engine.setBoard(rows);
-  const result = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
+  const result = play(engine, { r: 0, c: 0 }, { r: 0, c: 1 });
 
   const shuffle = result.frames.find(f => f.kind === 'shuffle' && f.moves);
   assert.ok(shuffle, 'shuffle frame should carry moves');
@@ -243,7 +251,7 @@ test('Score breakdown is populated in ScoreEvent', () => {
   ];
 
   engine.setBoard(board);
-  const result = engine.swap({ r: 0, c: 1 }, { r: 1, c: 1 });
+  const result = play(engine, { r: 0, c: 1 }, { r: 1, c: 1 });
 
   const removeFrame = result.frames.find(f => f.kind === 'remove');
   assert.ok(removeFrame, 'Should have remove frame');
@@ -273,7 +281,7 @@ test('Preview frames emitted during cascades', () => {
     eng.init();
     const move = eng.findValidMove();
     if (!move) continue;
-    const result = eng.swap(
+    const result = play(eng,
       { r: move.r1, c: move.c1 },
       { r: move.r2, c: move.c2 }
     );
@@ -286,25 +294,64 @@ test('Preview frames emitted during cascades', () => {
   assert.ok(foundPreview, 'at least one of 50 seeds should cascade and emit a preview frame');
 });
 
-// Regression: cascades were effectively unbounded at low gem counts because
-// fillGems refilled with no match-avoidance while init carefully avoided matches.
-// Worst measured before the fix: 142,888 cascade iterations / 338,156 frames /
-// 2.4 GB heap on a single 8x8 gems=2 move, freezing the tab for 7+ seconds.
-test('Cascades stay bounded at the lowest gem count', () => {
-  for (let seed = 0; seed < 8; seed++) {
-    const engine = new Engine({ rows: 8, cols: 8, gemTypes: 2, seed });
+// The cap is gone: waves are produced one at a time as they are pulled, so a
+// two-colour board may cascade for as long as it likes without the engine ever
+// holding more than one wave. Two halves: more than 60 waves arrive, and the
+// caller can stop pulling whenever it wants.
+test('Cascades are uncapped and produced lazily', () => {
+  let longest = 0;
+  for (let seed = 0; seed < 10 && longest <= 60; seed++) {
+    const engine = new Engine({ rows: 16, cols: 16, gemTypes: 2, seed });
     engine.init();
-
-    for (let move = 0; move < 12; move++) {
+    for (let move = 0; move < 5 && longest <= 60; move++) {
       const m = engine.findValidMove();
       if (!m) break;
       const result = engine.swap({ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
-      assert.ok(
-        result.frames.length < 500,
-        `seed ${seed} move ${move}: ${result.frames.length} frames - cascade is running away`
-      );
+      assert.equal(typeof result.frames.next, 'function', 'frames must be an iterator, not an array');
+      assert.equal(result.pointsEarned, 0, 'nothing is earned before a frame is pulled');
+      let waves = 0;
+      for (const frame of result.frames) {
+        if (frame.kind === 'remove') waves++;
+        if (waves > 60) break; // leaving the loop closes the generator
+      }
+      longest = Math.max(longest, waves);
     }
   }
+  assert.ok(longest > 60, `expected a 16x16 two-colour move to run past 60 waves; longest seen ${longest}`);
+});
+
+test('pointsEarned accumulates exactly as frames are pulled', () => {
+  const engine = new Engine({ rows: 8, cols: 8, gemTypes: 3, seed: 11 });
+  engine.init();
+  const m = engine.findValidMove();
+  assert.ok(m, 'fixture must have a legal move');
+  const result = engine.swap({ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
+  assert.equal(result.moveValid, true, 'validity is known before any frame is pulled');
+  assert.equal(result.pointsEarned, 0);
+  let sum = 0;
+  for (const frame of result.frames) {
+    if (frame.kind === 'remove') sum += frame.score.points;
+    assert.equal(result.pointsEarned, sum, `after a ${frame.kind} frame the tally must equal the wave scores pulled so far`);
+  }
+  assert.ok(sum > 0);
+  assert.equal(result.pointsEarned, sum);
+});
+
+test('An abandoned move leaves the board settled where the last pulled wave left it', () => {
+  const engine = new Engine({ rows: 8, cols: 8, gemTypes: 2, seed: 5 });
+  engine.init();
+  const m = engine.findValidMove();
+  const result = engine.swap({ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
+  let pulled = 0;
+  for (const frame of result.frames) {
+    pulled++;
+    if (frame.kind === 'fill') break;
+  }
+  assert.ok(pulled > 0);
+  const board = engine.state.board;
+  assert.ok(board.every(row => row.every(cell => cell !== null)), 'no holes after a fill frame');
+  const again = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
+  assert.equal(typeof again.frames.next, 'function', 'the engine accepts a new move after an abandoned one');
 });
 
 test('Refill does not manufacture immediate matches', () => {
@@ -314,7 +361,7 @@ test('Refill does not manufacture immediate matches', () => {
     engine.init();
     const m = engine.findValidMove();
     if (!m) continue;
-    engine.swap({ r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
+    play(engine, { r: m.r1, c: m.c1 }, { r: m.r2, c: m.c2 });
     // Whatever cascading happened, the engine must come to rest.
     assert.equal(
       findMatches(engine.state.board, 8, 8).length,
@@ -364,7 +411,7 @@ test('Special+special combo does not detonate the consumed specials twice', () =
 
   const engine = new Engine({ rows: 8, cols: 8, gemTypes: 5, seed: 3 });
   engine.setBoard(grid);
-  const result = engine.swap({ r: 3, c: 3 }, { r: 4, c: 3 });
+  const result = play(engine, { r: 3, c: 3 }, { r: 4, c: 3 });
 
   const blast = result.frames.find(f => f.kind === 'remove');
   assert.ok(blast, 'combo should emit a remove frame');
@@ -466,7 +513,7 @@ test('L of 5 makes a Corner beam gem on the intersection with an arm along each 
   assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
 
   engine.setBoard(board);
-  const result = engine.swap({ r: 1, c: 2 }, { r: 2, c: 2 });
+  const result = play(engine, { r: 1, c: 2 }, { r: 2, c: 2 });
   const { pos, gem } = placedSpecial(result);
   assert.deepEqual(pos, { r: 2, c: 2 });
   assert.equal(gem.special, SPECIAL.LINE);
@@ -488,7 +535,7 @@ test('T of 5 makes a Tee beam gem with three arms', () => {
   assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
 
   engine.setBoard(board);
-  const result = engine.swap({ r: 1, c: 2 }, { r: 2, c: 2 });
+  const result = play(engine, { r: 1, c: 2 }, { r: 2, c: 2 });
   const { pos, gem } = placedSpecial(result);
   assert.deepEqual(pos, { r: 2, c: 2 });
   assert.equal(gem.arms, ARM.LEFT | ARM.RIGHT | ARM.DOWN);
@@ -507,7 +554,7 @@ test('Plus of 5 (only a cascade can make one) makes a Cross beam gem with all fo
   ].map(row => row.map(t => makeCell(t)));
 
   engine.setBoard(board);
-  const result = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
+  const result = play(engine, { r: 0, c: 0 }, { r: 0, c: 1 });
   const { pos, gem } = placedSpecial(result);
   assert.deepEqual(pos, { r: 2, c: 2 });
   assert.equal(gem.arms, ARMS_ALL);
@@ -525,7 +572,7 @@ test('A shape made by a cascade is placed on its intersection, not near the cent
   ].map(row => row.map(t => makeCell(t)));
 
   engine.setBoard(board);
-  const result = engine.swap({ r: 0, c: 0 }, { r: 0, c: 1 });
+  const result = play(engine, { r: 0, c: 0 }, { r: 0, c: 1 });
   const { pos, gem } = placedSpecial(result);
   assert.deepEqual(pos, { r: 2, c: 2 }, 'the corner, where the legs meet');
   assert.equal(gem.arms, ARM.RIGHT | ARM.DOWN);
@@ -571,7 +618,7 @@ test('A matched beam gem fires each arm to the edge and nothing else', () => {
   assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
 
   engine.setBoard(board);
-  const frame = removeFrame(engine.swap({ r: 2, c: 0 }, { r: 2, c: 1 }));
+  const frame = removeFrame(play(engine, { r: 2, c: 0 }, { r: 2, c: 1 }));
   const removed = keys(frame.positions);
   assert.deepEqual(removed, ['0,1', '1,1', '1,2', '1,3', '1,4', '2,1', '3,1', '4,1']);
   assert.deepEqual(frame.effects.filter(e => e.kind === 'beam').map(e => e.dir).sort(), ['down', 'right']);
@@ -592,7 +639,7 @@ test('A beam gem on the edge with arms pointing off the board clears only its ma
   assert.equal(findMatches(board, 5, 5).length, 0, 'fixture must start match-free');
 
   engine.setBoard(board);
-  const frame = removeFrame(engine.swap({ r: 1, c: 3 }, { r: 0, c: 3 }));
+  const frame = removeFrame(play(engine, { r: 1, c: 3 }, { r: 0, c: 3 }));
   assert.deepEqual(keys(frame.positions), ['0,2', '0,3', '0,4']);
   assert.equal(frame.effects.filter(e => e.kind === 'beam').length, 0);
 });
@@ -609,7 +656,7 @@ test('Beam + beam fires the union of both arm masks from the first-selected cell
   const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
   engine.setBoard(board);
 
-  const frame = removeFrame(engine.swap({ r: 2, c: 2 }, { r: 2, c: 3 }));
+  const frame = removeFrame(play(engine, { r: 2, c: 2 }, { r: 2, c: 3 }));
   assert.equal(frame.positions.length, 9, 'row 2 plus column 2');
   assert.equal(frame.score.points, 800 + 9 * 12);
   assert.equal(frame.effects.filter(e => e.kind === 'beam').length, 4);
@@ -622,7 +669,7 @@ test('Beam + bomb fires each arm three cells wide', () => {
   const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
   engine.setBoard(board);
 
-  const frame = removeFrame(engine.swap({ r: 2, c: 2 }, { r: 2, c: 3 }));
+  const frame = removeFrame(play(engine, { r: 2, c: 2 }, { r: 2, c: 3 }));
   assert.equal(frame.positions.length, 15, 'rows 1..3 across the board');
   assert.equal(frame.score.points, 1200 + 15 * 15);
   assert.equal(frame.effects.filter(e => e.kind === 'beam').length, 6);
@@ -635,7 +682,7 @@ test('Beam + rainbow gives every gem of the partner colour the same arms', () =>
   const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
   engine.setBoard(board);
 
-  const frame = removeFrame(engine.swap({ r: 2, c: 2 }, { r: 2, c: 3 }));
+  const frame = removeFrame(play(engine, { r: 2, c: 2 }, { r: 2, c: 3 }));
   // After the swap the colour-3 gems sit in columns 0, 1, 2 and 4; each fires its column.
   assert.equal(frame.positions.length, 4 * 5 + 1, 'four full columns plus the rainbow');
   assert.equal(frame.score.points, 2500 + 21 * 20);
@@ -652,7 +699,7 @@ test('Every combo consumes both swapped specials', () => {
   engine.setBoard(board);
 
   // Union is a single UP arm from (2,2): (2,2),(1,2),(0,2). (3,2) is only cleared because it is consumed.
-  const frame = removeFrame(engine.swap({ r: 2, c: 2 }, { r: 3, c: 2 }));
+  const frame = removeFrame(play(engine, { r: 2, c: 2 }, { r: 3, c: 2 }));
   assert.deepEqual(keys(frame.positions), ['0,2', '1,2', '2,2', '3,2']);
 });
 
@@ -663,7 +710,7 @@ test('The same seed, board and swap produce identical frames', () => {
     board[2][2] = makeCell(2, SPECIAL.LINE, ARMS_ALL);
     board[2][3] = makeCell(3, SPECIAL.BOMB);
     engine.setBoard(board);
-    return engine.swap({ r: 2, c: 2 }, { r: 2, c: 3 });
+    return play(engine, { r: 2, c: 2 }, { r: 2, c: 3 });
   };
   assert.equal(JSON.stringify(make().frames), JSON.stringify(make().frames));
 });
@@ -680,7 +727,7 @@ test('A beam gem that reaches the engine without arms fires as a horizontal line
   ].map(row => row.map(t => makeCell(t)));
   chainBoard[1][1] = makeCell(0, SPECIAL.LINE, null);
   chain.setBoard(chainBoard);
-  const chainFrame = removeFrame(chain.swap({ r: 2, c: 0 }, { r: 2, c: 1 }));
+  const chainFrame = removeFrame(play(chain, { r: 2, c: 0 }, { r: 2, c: 1 }));
   assert.deepEqual(keys(chainFrame.positions), ['0,1', '1,0', '1,1', '1,2', '1,3', '1,4', '2,1']);
 
   // Beam + beam with both masks missing: the union is one horizontal line, not a cross.
@@ -689,6 +736,6 @@ test('A beam gem that reaches the engine without arms fires as a horizontal line
   comboBoard[2][2] = makeCell(2, SPECIAL.LINE, null);
   comboBoard[2][3] = makeCell(3, SPECIAL.LINE, null);
   combo.setBoard(comboBoard);
-  const comboFrame = removeFrame(combo.swap({ r: 2, c: 2 }, { r: 2, c: 3 }));
+  const comboFrame = removeFrame(play(combo, { r: 2, c: 2 }, { r: 2, c: 3 }));
   assert.deepEqual(keys(comboFrame.positions), ['2,0', '2,1', '2,2', '2,3', '2,4']);
 });

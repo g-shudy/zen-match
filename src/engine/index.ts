@@ -113,21 +113,26 @@ export type Frame =
   | { kind: 'preview'; board: Board; pendingPositions: Pos[] }
   | { kind: 'shuffle'; board: Board; attempt: number; moves?: GemMove[] };
 
-export interface ResolveResult {
-  frames: Frame[];
-  pointsEarned: number;
-  moveValid: boolean;
+export interface MoveResult {
+  // Produced one cascade wave at a time as the caller pulls them; the engine holds
+  // at most one wave. Leaving a for...of early closes the generator, and the board
+  // stays as the last pulled wave left it.
+  frames: IterableIterator<Frame>;
+  // Accumulates as frames are pulled; final once the iterator is exhausted.
+  readonly pointsEarned: number;
+  // Known before the first frame: the swap made a match or fired a combo.
+  readonly moveValid: boolean;
 }
 
-// Cascade waves allowed per move. The match-avoiding refill in fillGems cuts runaway
-// depth by ~99% (measured worst case 142,888 -> 1,824 waves at 16x16 gems=2) but does
-// not fully tame the lowest gem counts, so this cap does genuinely fire at gems=2/3 -
-// it is load-bearing there, not decoration.
-//
-// It is a playability limit as much as a safety one: playFrames animates at 100-700ms
-// per frame, so 50 waves is already ~75 seconds of animation for a single move.
-// Untamed, one gems=2 move blocked the main thread for 7.3s and grew the heap to 2.4GB.
-const MAX_CASCADE_DEPTH = 50;
+// Shared by every generator that clears gems during one move.
+interface Tally {
+  points: number;
+}
+
+// There is no cap on cascade waves. A move's frames are a generator, so a
+// two-colour board that cascades for minutes costs one wave of work per pull and
+// one board of memory; the old 50-wave cap existed only because every wave was
+// computed and stored up front.
 
 interface MatchGroup {
   positions: Pos[];
@@ -299,31 +304,60 @@ export class Engine {
     this.state.board = cloneBoard(board);
   }
 
-  swap(pos1: Pos, pos2: Pos): ResolveResult {
-    const { rows, cols } = this.state;
-    const board = this.state.board;
-    const frames: Frame[] = [];
-    let pointsEarned = 0;
-    let moveValid = false;
+  swap(pos1: Pos, pos2: Pos): MoveResult {
+    const { rows, cols, board } = this.state;
+    const tally: Tally = { points: 0 };
 
     if (!board[pos1.r]?.[pos1.c] || !board[pos2.r]?.[pos2.c]) {
-      return { frames, pointsEarned, moveValid };
+      return { frames: (function* (): Generator<Frame, void, undefined> {})(), pointsEarned: 0, moveValid: false };
     }
 
     this.state.lastSwapPos = { r1: pos1.r, c1: pos1.c, r2: pos2.r, c2: pos2.c };
 
     const gem1 = board[pos1.r][pos1.c];
     const gem2 = board[pos2.r][pos2.c];
+
+    // Apply the swap now, so validity is known before any frame is pulled.
+    [board[pos1.r][pos1.c], board[pos2.r][pos2.c]] = [board[pos2.r][pos2.c], board[pos1.r][pos1.c]];
+
+    const bothAreSpecial = isSpecial(gem1) && isSpecial(gem2);
+    const rainbowSwap = isRainbow(gem1) || isRainbow(gem2);
+    const moveValid = bothAreSpecial || rainbowSwap || findMatches(board, rows, cols).length > 0;
+
+    const frames = this.resolveMove(pos1, pos2, gem1, gem2, moveValid, tally);
+    return {
+      frames,
+      get pointsEarned() {
+        return tally.points;
+      },
+      moveValid
+    };
+  }
+
+  private *resolveMove(
+    pos1: Pos,
+    pos2: Pos,
+    gem1: Cell | null,
+    gem2: Cell | null,
+    moveValid: boolean,
+    tally: Tally
+  ): Generator<Frame, void, undefined> {
+    const { rows, cols, board } = this.state;
+
+    yield { kind: 'swap', board: cloneBoard(board) };
+
+    if (!moveValid) {
+      yield { kind: 'invalid', positions: [pos1, pos2] };
+      [board[pos1.r][pos1.c], board[pos2.r][pos2.c]] = [board[pos2.r][pos2.c], board[pos1.r][pos1.c]];
+      yield { kind: 'board', board: cloneBoard(board) };
+      yield* rescueDeadBoard(this.state, tally);
+      this.state.lastSwapPos = null;
+      return;
+    }
+
     const gem1Special = gem1?.special;
     const gem2Special = gem2?.special;
-
-    // Swap
-    [board[pos1.r][pos1.c], board[pos2.r][pos2.c]] = [board[pos2.r][pos2.c], board[pos1.r][pos1.c]];
-    frames.push({ kind: 'swap', board: cloneBoard(board) });
-
-    const gem1IsSpecial = isSpecial(gem1);
-    const gem2IsSpecial = isSpecial(gem2);
-    const bothAreSpecial = gem1IsSpecial && gem2IsSpecial;
+    const bothAreSpecial = isSpecial(gem1) && isSpecial(gem2);
 
     // Design decision: When two specials are swapped, they always interact with
     // a combined effect rather than requiring a match. This follows the Candy Crush
@@ -482,10 +516,9 @@ export class Engine {
       chainReactionCount += chainCount;
       points += bonusPoints;
 
-      pointsEarned += points;
-      moveValid = true;
+      tally.points += points;
 
-      frames.push({
+      yield {
         kind: 'remove',
         positions: positionsFromSet(toRemove),
         animations: mapToRecord(animationClasses),
@@ -496,25 +529,16 @@ export class Engine {
           breakdown: { base: points, matchBonus: 0, comboMultiplier: 1 },
           isBonus: true
         }
-      });
+      };
 
       removePositions(board, toRemove);
-      frames.push({ kind: 'board', board: cloneBoard(board) });
+      yield { kind: 'board', board: cloneBoard(board) };
 
       const dropMoves = dropGems(board, rows, cols);
-      if (dropMoves.length > 0) frames.push({ kind: 'drop', board: cloneBoard(board), moves: dropMoves });
+      if (dropMoves.length > 0) yield { kind: 'drop', board: cloneBoard(board), moves: dropMoves };
 
       const fillMoves = fillGems(board, rows, cols, this.state.gemTypes, this.state.rng);
-      if (fillMoves.length > 0) frames.push({ kind: 'fill', board: cloneBoard(board), moves: fillMoves });
-
-      const cascadeResult = processMatches(this.state, frames);
-      pointsEarned += cascadeResult.points;
-
-      if (!hasValidMoves(board, rows, cols)) {
-        const shuffleResult = shuffleBoard(this.state, 0);
-        frames.push(...shuffleResult.frames);
-        pointsEarned += shuffleResult.points;
-      }
+      if (fillMoves.length > 0) yield { kind: 'fill', board: cloneBoard(board), moves: fillMoves };
     } else if (gem1Special === SPECIAL.RAINBOW || gem2Special === SPECIAL.RAINBOW) {
       const gem1IsRainbow = gem1Special === SPECIAL.RAINBOW;
       const targetType = gem1IsRainbow ? gem2?.type : gem1?.type;
@@ -552,10 +576,9 @@ export class Engine {
       );
 
       const points = 500 + toRemove.size * 10 + bonusPoints;
-      pointsEarned += points;
-      moveValid = true;
+      tally.points += points;
 
-      frames.push({
+      yield {
         kind: 'remove',
         positions: positionsFromSet(toRemove),
         animations: mapToRecord(animationClasses),
@@ -566,65 +589,24 @@ export class Engine {
           breakdown: { base: points, matchBonus: 0, comboMultiplier: 1 },
           isBonus: true
         }
-      });
+      };
 
       removePositions(board, toRemove);
-      frames.push({ kind: 'board', board: cloneBoard(board) });
+      yield { kind: 'board', board: cloneBoard(board) };
 
       const dropMoves = dropGems(board, rows, cols);
-      if (dropMoves.length > 0) frames.push({ kind: 'drop', board: cloneBoard(board), moves: dropMoves });
+      if (dropMoves.length > 0) yield { kind: 'drop', board: cloneBoard(board), moves: dropMoves };
 
       const fillMoves = fillGems(board, rows, cols, this.state.gemTypes, this.state.rng);
-      if (fillMoves.length > 0) frames.push({ kind: 'fill', board: cloneBoard(board), moves: fillMoves });
-
-      const cascadeResult = processMatches(this.state, frames);
-      pointsEarned += cascadeResult.points;
-
-      if (!hasValidMoves(board, rows, cols)) {
-        const sr = shuffleBoard(this.state, 0);
-        frames.push(...sr.frames);
-        pointsEarned += sr.points;
-      }
-    } else if (gem1IsSpecial || gem2IsSpecial) {
-      const matches = findMatches(board, rows, cols);
-      if (matches.length > 0) {
-        const cascadeResult = processMatches(this.state, frames);
-        pointsEarned += cascadeResult.points;
-        moveValid = cascadeResult.points > 0;
-
-        if (!hasValidMoves(board, rows, cols)) {
-          const sr = shuffleBoard(this.state, 0);
-          frames.push(...sr.frames);
-          pointsEarned += sr.points;
-        }
-      } else {
-        frames.push({ kind: 'invalid', positions: [pos1, pos2] });
-        [board[pos1.r][pos1.c], board[pos2.r][pos2.c]] = [board[pos2.r][pos2.c], board[pos1.r][pos1.c]];
-        frames.push({ kind: 'board', board: cloneBoard(board) });
-        pointsEarned += rescueDeadBoard(this.state, frames);
-      }
-    } else {
-      const matches = findMatches(board, rows, cols);
-      if (matches.length === 0) {
-        frames.push({ kind: 'invalid', positions: [pos1, pos2] });
-        [board[pos1.r][pos1.c], board[pos2.r][pos2.c]] = [board[pos2.r][pos2.c], board[pos1.r][pos1.c]];
-        frames.push({ kind: 'board', board: cloneBoard(board) });
-        pointsEarned += rescueDeadBoard(this.state, frames);
-      } else {
-        const cascadeResult = processMatches(this.state, frames);
-        pointsEarned += cascadeResult.points;
-        moveValid = cascadeResult.points > 0;
-
-        if (!hasValidMoves(board, rows, cols)) {
-          const sr = shuffleBoard(this.state, 0);
-          frames.push(...sr.frames);
-          pointsEarned += sr.points;
-        }
-      }
+      if (fillMoves.length > 0) yield { kind: 'fill', board: cloneBoard(board), moves: fillMoves };
     }
 
+    // Every valid move ends the same way: cascade until the board settles, then
+    // reshuffle if it settled with no legal move left.
+    yield* cascadeWaves(this.state, tally);
+    if (!hasValidMoves(board, rows, cols)) yield* shuffleWaves(this.state, 0, tally);
+
     this.state.lastSwapPos = null;
-    return { frames, pointsEarned, moveValid };
   }
 
   hasValidMoves(): boolean {
@@ -906,11 +888,9 @@ function activateSpecialsInRemovalSet(
 // Shuffle if the board has no legal move left. The valid-move paths already do this
 // after their cascade; the invalid-swap paths did not, so a board that went dead
 // stayed dead — every subsequent swap snapping back with no explanation.
-function rescueDeadBoard(state: EngineState, frames: Frame[]): number {
-  if (hasValidMoves(state.board, state.rows, state.cols)) return 0;
-  const result = shuffleBoard(state, 0);
-  frames.push(...result.frames);
-  return result.points;
+function* rescueDeadBoard(state: EngineState, tally: Tally): Generator<Frame, void, undefined> {
+  if (hasValidMoves(state.board, state.rows, state.cols)) return;
+  yield* shuffleWaves(state, 0, tally);
 }
 
 function findBestSpecialPosition(match: MatchGroup, lastSwapPos: EngineState['lastSwapPos'], comboCount = 1): Pos {
@@ -951,16 +931,12 @@ function armsFromIntersection(match: MatchGroup): Arms {
   return arms;
 }
 
-function processMatches(state: EngineState, frames: Frame[]): { points: number } {
+function* cascadeWaves(state: EngineState, tally: Tally): Generator<Frame, void, undefined> {
   const { rows, cols, board } = state;
   let matches = findMatches(board, rows, cols);
-  let totalPoints = 0;
   let comboCount = 0;
 
-  // Bounding the `while` rather than breaking mid-body means a truncated cascade
-  // always leaves the board in the settled post-fill state the last wave produced,
-  // never half-resolved. See MAX_CASCADE_DEPTH for why the cap is not decorative.
-  while (matches.length > 0 && comboCount < MAX_CASCADE_DEPTH) {
+  while (matches.length > 0) {
     comboCount++;
 
     const toRemove = new Set<string>();
@@ -1016,9 +992,9 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
     const basePoints = toRemove.size * 10;
     const comboMultiplier = 1 + (comboCount - 1) * 0.5;
     const points = Math.floor((basePoints + matchBonus) * comboMultiplier);
-    totalPoints += points;
+    tally.points += points;
 
-    frames.push({
+    yield {
       kind: 'remove',
       positions: positionsFromSet(toRemove),
       animations: mapToRecord(animationClasses),
@@ -1030,7 +1006,7 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
         isBonus: matchBonus > 50
       },
       subSteps: subSteps.length > 0 ? subSteps : undefined
-    });
+    };
 
     removePositions(board, toRemove);
 
@@ -1053,13 +1029,13 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
       }
     }
 
-    frames.push({ kind: 'board', board: cloneBoard(board), newSpecials: newSpecialPositions.length > 0 ? newSpecialPositions : undefined });
+    yield { kind: 'board', board: cloneBoard(board), newSpecials: newSpecialPositions.length > 0 ? newSpecialPositions : undefined };
 
     const dropMoves = dropGems(board, rows, cols);
-    if (dropMoves.length > 0) frames.push({ kind: 'drop', board: cloneBoard(board), moves: dropMoves });
+    if (dropMoves.length > 0) yield { kind: 'drop', board: cloneBoard(board), moves: dropMoves };
 
     const fillMoves = fillGems(board, rows, cols, state.gemTypes, state.rng);
-    if (fillMoves.length > 0) frames.push({ kind: 'fill', board: cloneBoard(board), moves: fillMoves });
+    if (fillMoves.length > 0) yield { kind: 'fill', board: cloneBoard(board), moves: fillMoves };
 
     matches = findMatches(board, rows, cols);
 
@@ -1071,11 +1047,9 @@ function processMatches(state: EngineState, frames: Frame[]): { points: number }
           pendingPositions.push(pos);
         }
       }
-      frames.push({ kind: 'preview', board: cloneBoard(board), pendingPositions });
+      yield { kind: 'preview', board: cloneBoard(board), pendingPositions };
     }
   }
-
-  return { points: totalPoints };
 }
 
 function dropGems(board: Board, rows: number, cols: number): GemMove[] {
@@ -1265,9 +1239,7 @@ function isMoveValid(board: Board, rows: number, cols: number, r1: number, c1: n
   return hasMatch;
 }
 
-function shuffleBoard(state: EngineState, attempts: number): { frames: Frame[]; points: number } {
-  const frames: Frame[] = [];
-  let shufflePoints = 0;
+function* shuffleWaves(state: EngineState, attempts: number, tally: Tally): Generator<Frame, void, undefined> {
   const MAX_SHUFFLE_ATTEMPTS = 10;
   const MAX_VISUAL_ATTEMPTS = 3;
   const { rows, cols, board } = state;
@@ -1304,25 +1276,20 @@ function shuffleBoard(state: EngineState, attempts: number): { frames: Frame[]; 
 
   // Phase 4C: Only emit shuffle frames for first 3 attempts
   if (attempts < MAX_VISUAL_ATTEMPTS) {
-    frames.push({ kind: 'shuffle', board: cloneBoard(board), attempt: attempts, moves });
+    yield { kind: 'shuffle', board: cloneBoard(board), attempt: attempts, moves };
   }
 
   // Phase 4A: Award points for shuffle cascades (don't discard)
   if (findMatches(board, rows, cols).length > 0) {
-    const cascadeResult = processMatches(state, frames);
-    shufflePoints += cascadeResult.points;
+    yield* cascadeWaves(state, tally);
   }
 
   if (!hasValidMoves(board, rows, cols) && attempts < MAX_SHUFFLE_ATTEMPTS) {
-    const result = shuffleBoard(state, attempts + 1);
-    frames.push(...result.frames);
-    shufflePoints += result.points;
+    yield* shuffleWaves(state, attempts + 1, tally);
   } else if (!hasValidMoves(board, rows, cols)) {
     regenerateBoard(state);
-    frames.push({ kind: 'shuffle', board: cloneBoard(state.board), attempt: attempts + 1 });
+    yield { kind: 'shuffle', board: cloneBoard(state.board), attempt: attempts + 1 };
   }
-
-  return { frames, points: shufflePoints };
 }
 
 function regenerateBoard(state: EngineState): void {
