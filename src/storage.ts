@@ -85,7 +85,7 @@ export function resolveSettings(params: URLSearchParams, stored: Settings): Sett
 }
 
 export interface SavedGame {
-  v: 1;
+  v: 2;
   rows: number;
   cols: number;
   gemTypes: number;
@@ -99,15 +99,31 @@ export interface SavedGame {
 export type GameSnapshot = Omit<SavedGame, 'v' | 'savedAt'>;
 
 export function serializeGame(game: GameSnapshot, now: number = Date.now()): string {
-  const saved: SavedGame = { v: 1, ...game, savedAt: now };
+  const saved: SavedGame = { v: 2, ...game, savedAt: now };
   return JSON.stringify(saved);
 }
 
 const SPECIALS = new Set<unknown>([null, 'bomb', 'line', 'rainbow']);
-const DIRECTIONS = new Set<unknown>([null, 'horizontal', 'vertical', 'cross']);
+
+// v1 stored a line gem's direction; v2 stores an arm mask (UP 1, RIGHT 2, DOWN 4, LEFT 8).
+// A Map rather than an object literal, so a direction like "constructor" cannot
+// resolve through the prototype chain.
+const V1_DIRECTION_ARMS = new Map<string, number>([['horizontal', 10], ['vertical', 5], ['cross', 15]]);
 
 function isCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+// A v1 cell becomes a v2 cell, or null when its direction is not one v1 could write.
+function migrateV1Cell(value: unknown): unknown {
+  const cell = asRecord(value);
+  if (!cell) return value;
+  const direction = cell.direction ?? null;
+  if (direction !== null && !(typeof direction === 'string' && V1_DIRECTION_ARMS.has(direction))) return null;
+  const arms = cell.special === 'line'
+    ? (typeof direction === 'string' ? V1_DIRECTION_ARMS.get(direction)! : V1_DIRECTION_ARMS.get('horizontal')!)
+    : null;
+  return { type: cell.type, special: cell.special ?? null, arms };
 }
 
 function isCell(value: unknown, gemTypes: number): value is Cell {
@@ -115,8 +131,9 @@ function isCell(value: unknown, gemTypes: number): value is Cell {
   if (!cell) return false;
   if (!isCount(cell.type) || cell.type >= gemTypes) return false;
   if (!SPECIALS.has(cell.special ?? null)) return false;
-  if (!DIRECTIONS.has(cell.direction ?? null)) return false;
-  return true;
+  const arms = cell.arms ?? null;
+  if (cell.special === 'line') return typeof arms === 'number' && Number.isInteger(arms) && arms >= 1 && arms <= 15;
+  return arms === null;
 }
 
 function isBoard(value: unknown, rows: number, cols: number, gemTypes: number): value is Board {
@@ -128,27 +145,31 @@ function isBoard(value: unknown, rows: number, cols: number, gemTypes: number): 
 
 // Returns the saved game only if it was recorded for exactly this board shape and
 // gem count; a board saved under other settings cannot be resumed meaningfully.
+// v1 blobs are migrated cell by cell before validation.
 export function parseSavedGame(
   json: string | null | undefined,
   expect: { rows: number; cols: number; gemTypes: number }
 ): SavedGame | null {
   const raw = asRecord(parseJson(json));
-  if (!raw || raw.v !== 1) return null;
+  if (!raw || (raw.v !== 1 && raw.v !== 2)) return null;
   if (raw.rows !== expect.rows || raw.cols !== expect.cols || raw.gemTypes !== expect.gemTypes) return null;
-  if (!isBoard(raw.board, expect.rows, expect.cols, expect.gemTypes)) return null;
+  const board = raw.v === 1 && Array.isArray(raw.board)
+    ? raw.board.map(row => (Array.isArray(row) ? row.map(migrateV1Cell) : row))
+    : raw.board;
+  if (!isBoard(board, expect.rows, expect.cols, expect.gemTypes)) return null;
   if (!isCount(raw.points) || !isCount(raw.moves) || !isCount(raw.maxCombo)) return null;
   const savedAt = typeof raw.savedAt === 'number' && Number.isFinite(raw.savedAt) ? raw.savedAt : 0;
 
   return {
-    v: 1,
+    v: 2,
     rows: expect.rows,
     cols: expect.cols,
     gemTypes: expect.gemTypes,
-    board: raw.board.map(row =>
+    board: board.map(row =>
       row.map(cell => ({
         type: cell!.type,
         special: cell!.special ?? null,
-        direction: cell!.direction ?? null
+        arms: cell!.special === 'line' ? cell!.arms : null
       }))
     ),
     points: raw.points,

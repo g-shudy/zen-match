@@ -11,7 +11,7 @@ import {
 
 function makeBoard(rows, cols, type = 0) {
   return Array.from({ length: rows }, () =>
-    Array.from({ length: cols }, () => ({ type, special: null, direction: null }))
+    Array.from({ length: cols }, () => ({ type, special: null, arms: null }))
   );
 }
 
@@ -62,11 +62,11 @@ test('resolveSettings lets valid URL params override stored board values', () =>
 
 test('saved game survives a round trip and restores every field', () => {
   const board = makeBoard(4, 4, 2);
-  board[1][2] = { type: 1, special: 'line', direction: 'vertical' };
+  board[1][2] = { type: 1, special: 'line', arms: 5 };
   const json = serializeGame({ rows: 4, cols: 4, gemTypes: 5, board, points: 1230, moves: 7, maxCombo: 3 }, 1700000000000);
   const saved = parseSavedGame(json, { rows: 4, cols: 4, gemTypes: 5 });
   assert.ok(saved);
-  assert.equal(saved.v, 1);
+  assert.equal(saved.v, 2);
   assert.equal(saved.savedAt, 1700000000000);
   assert.equal(saved.points, 1230);
   assert.equal(saved.moves, 7);
@@ -85,7 +85,7 @@ test('parseSavedGame rejects anything that does not fit the current board', () =
   assert.equal(parseSavedGame(json, { rows: 4, cols: 4, gemTypes: 6 }), null, 'different gem count');
 
   const wrongVersion = JSON.parse(json);
-  wrongVersion.v = 2;
+  wrongVersion.v = 3;
   assert.equal(parseSavedGame(JSON.stringify(wrongVersion), expect), null);
 
   const outOfRange = JSON.parse(json);
@@ -104,9 +104,21 @@ test('parseSavedGame rejects anything that does not fit the current board', () =
   badSpecial.board[0][0].special = 'nuke';
   assert.equal(parseSavedGame(JSON.stringify(badSpecial), expect), null, 'unknown special');
 
-  const badDirection = JSON.parse(json);
-  badDirection.board[0][0] = { type: 0, special: 'line', direction: 'diagonal' };
-  assert.equal(parseSavedGame(JSON.stringify(badDirection), expect), null, 'unknown direction');
+  const badArms = JSON.parse(json);
+  badArms.board[0][0] = { type: 0, special: 'line', arms: 16 };
+  assert.equal(parseSavedGame(JSON.stringify(badArms), expect), null, 'arms above 15');
+
+  const zeroArms = JSON.parse(json);
+  zeroArms.board[0][0] = { type: 0, special: 'line', arms: 0 };
+  assert.equal(parseSavedGame(JSON.stringify(zeroArms), expect), null, 'a beam gem must have an arm');
+
+  const fractionalArms = JSON.parse(json);
+  fractionalArms.board[0][0] = { type: 0, special: 'line', arms: 2.5 };
+  assert.equal(parseSavedGame(JSON.stringify(fractionalArms), expect), null, 'fractional arms');
+
+  const armsOnBomb = JSON.parse(json);
+  armsOnBomb.board[0][0] = { type: 0, special: 'bomb', arms: 3 };
+  assert.equal(parseSavedGame(JSON.stringify(armsOnBomb), expect), null, 'arms on a non-beam gem');
 
   const negative = JSON.parse(json);
   negative.points = -5;
@@ -115,4 +127,40 @@ test('parseSavedGame rejects anything that does not fit the current board', () =
   const fractional = JSON.parse(json);
   fractional.moves = 1.5;
   assert.equal(parseSavedGame(JSON.stringify(fractional), expect), null, 'fractional moves');
+});
+
+function v1Game(cell) {
+  const board = Array.from({ length: 4 }, () =>
+    Array.from({ length: 4 }, () => ({ type: 2, special: null, direction: null }))
+  );
+  board[1][1] = cell;
+  return JSON.stringify({ v: 1, rows: 4, cols: 4, gemTypes: 5, board, points: 40, moves: 2, maxCombo: 1, savedAt: 5 });
+}
+
+test('a v1 saved game migrates line directions to arms', () => {
+  const expect = { rows: 4, cols: 4, gemTypes: 5 };
+  const cases = [
+    [{ type: 1, special: 'line', direction: 'horizontal' }, 10],
+    [{ type: 1, special: 'line', direction: 'vertical' }, 5],
+    [{ type: 1, special: 'line', direction: 'cross' }, 15],
+    [{ type: 1, special: 'line', direction: null }, 10]
+  ];
+  for (const [cell, arms] of cases) {
+    const saved = parseSavedGame(v1Game(cell), expect);
+    assert.ok(saved, `v1 blob with direction ${cell.direction} must load`);
+    assert.equal(saved.v, 2);
+    assert.deepEqual(saved.board[1][1], { type: 1, special: 'line', arms });
+    assert.deepEqual(saved.board[0][0], { type: 2, special: null, arms: null });
+    assert.equal(saved.points, 40);
+  }
+});
+
+test('a v1 saved game with an unknown direction or a bomb carrying a direction is rejected', () => {
+  const expect = { rows: 4, cols: 4, gemTypes: 5 };
+  assert.equal(parseSavedGame(v1Game({ type: 1, special: 'line', direction: 'diagonal' }), expect), null);
+  assert.deepEqual(
+    parseSavedGame(v1Game({ type: 1, special: 'bomb', direction: 'horizontal' }), expect)?.board[1][1],
+    { type: 1, special: 'bomb', arms: null },
+    'a stray direction on a non-line cell is dropped, as the old validator allowed it'
+  );
 });
