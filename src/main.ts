@@ -216,13 +216,19 @@ function applyPose({ animate = true }: { animate?: boolean } = {}): void {
   boardFrameEl.style.setProperty('--turn-ms', `${turnMs}ms`);
   if (turnMs > 0 && turned) {
     window.clearTimeout(turningTimeoutId);
+    // Re-adding a class the element already has does not restart its
+    // animation, so drop it and force a reflow first: a second press inside
+    // the turn window lifts again from the top rather than riding out the
+    // first lift's tail.
+    boardFrameEl.classList.remove('turning');
+    void boardFrameEl.offsetWidth;
     boardFrameEl.classList.add('turning');
     turningTimeoutId = window.setTimeout(() => boardFrameEl.classList.remove('turning'), turnMs);
   }
   boardEl.style.setProperty('--board-rotation', `${pose.visualRotation}deg`);
   boardEl.dataset.rotation = String(pose.rotation);
   engine.setGravity(next.gravity);
-  updateBoardSizing();
+  updateBoardSizing({ animate: turnMs > 0 });
   if (turnMs === 0) {
     // Commit the instant change before restoring the duration, or the next
     // style recalc would see the normal duration and animate anyway.
@@ -348,7 +354,12 @@ function isAdjacent(a: Pos, b: Pos): boolean {
 // the board element is rotated, so a screen rect would be in the wrong frame.
 const layout = { cell: 48, gap: 4, pad: 16 };
 
-function updateBoardSizing(): void {
+// `--turn-ms` rests at the turn duration so the frame and the cell size ease
+// through a pose change. Every other caller - a window resize, the post-load
+// font re-measure, a grid rebuild - must land instantly, so it zeroes the
+// duration around the write and restores it once the new size is committed.
+function updateBoardSizing({ animate = false }: { animate?: boolean } = {}): void {
+  if (!animate) boardFrameEl.style.setProperty('--turn-ms', '0ms');
   const narrow = window.innerWidth <= 480;
   const boardPadding = (narrow ? 12 : 32) + 2; // padding both sides + 1px border each side
   const gap = narrow ? 2 : 4;
@@ -368,7 +379,10 @@ function updateBoardSizing(): void {
 
   const availWidth = window.innerWidth - padX - railWidth - boardPadding - (screenCols - 1) * gap;
   const availHeight = window.innerHeight - padY - chromeHeight - boardPadding - (screenRows - 1) * gap;
-  const cellSize = Math.max(12, Math.min(72, Math.floor(Math.min(availWidth / screenCols, availHeight / screenRows))));
+  // A big board on a phone is small rather than clipped: the page cannot
+  // scroll, so a 12px floor would push the outer columns off-screen.
+  const minCell = narrow ? 7 : 12;
+  const cellSize = Math.max(minCell, Math.min(72, Math.floor(Math.min(availWidth / screenCols, availHeight / screenRows))));
   const gemSize = cellSize - (cellSize < 28 ? 4 : 6);
 
   const boardW = boardPadding + config.cols * cellSize + (config.cols - 1) * gap;
@@ -385,6 +399,13 @@ function updateBoardSizing(): void {
   boardEl.style.setProperty('--gem-size', `${gemSize}px`);
   boardEl.style.setProperty('--gem-radius', `${Math.max(2, Math.round(gemSize * 0.18))}px`);
   boardEl.style.setProperty('--gap', `${gap}px`);
+
+  if (!animate) {
+    // Commit the new size before restoring the duration, or the next style
+    // recalc would see the normal duration and ease into it after the fact.
+    void boardEl.offsetHeight;
+    boardFrameEl.style.setProperty('--turn-ms', `${config.timing.turn}ms`);
+  }
 }
 
 function createGrid(): void {
@@ -1047,9 +1068,11 @@ async function trySwap(pos1: Pos, pos2: Pos): Promise<void> {
     await playFrames(result.frames, localToken);
   } finally {
     // Must run even when a New Game superseded this move, or the board stays
-    // locked behind pointer-events: none.
+    // locked behind pointer-events: none. aria-busy is different: a superseded
+    // move no longer owns it - startNewGame holds it across the dissolve and
+    // clears it in its own finally - so only the move still in charge lifts it.
     boardEl.classList.remove('processing');
-    boardEl.removeAttribute('aria-busy');
+    if (localToken === gameState.runToken) boardEl.removeAttribute('aria-busy');
   }
 
   if (localToken !== gameState.runToken) return;
