@@ -449,9 +449,18 @@ button {
 
 /* 6. Board & gems --------------------------------------------------------- */
 
-.board {
+/* The frame is the board's footprint on screen (swapped when the board is turned
+   sideways); the board itself keeps its unrotated grid and turns inside it. */
+.board-frame {
   grid-area: board;
   position: relative;
+}
+
+.board {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(var(--board-rotation, 0deg));
   display: grid;
   grid-template-columns: repeat(var(--grid-cols, 8), var(--cell-size, 48px));
   gap: var(--gap, 4px);
@@ -465,7 +474,7 @@ button {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  transition: box-shadow 1.2s var(--ease);
+  transition: box-shadow 1.2s var(--ease), transform var(--turn-ms, 600ms) var(--ease);
 }
 
 /* A long cascade brightens the frame like a slow inhale - no flash, no shake. */
@@ -1391,9 +1400,12 @@ button {
 
   .sheet-body,
   .sheet::backdrop,
-  .toast,
-  .board {
+  .toast {
     transition: none;
+  }
+
+  .board {
+    transition: box-shadow 1.2s var(--ease);
   }
 
   /* The hold ring stays: it is the progress indicator. Only the completion pulse goes. */

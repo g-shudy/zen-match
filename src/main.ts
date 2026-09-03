@@ -24,6 +24,7 @@ import {
   type Settings
 } from './storage';
 import { createHold } from './hold';
+import { boardPose, toBoardDelta, type Rotation } from './orientation';
 
 declare const __APP_VERSION__: string;
 
@@ -110,7 +111,8 @@ const config = {
     reform: 520,
     glow: 1400,
     ambient: 1200,
-    holdToStart: 1000
+    holdToStart: 1000,
+    turn: 600
   }
 };
 
@@ -140,12 +142,14 @@ function getEl<T extends HTMLElement>(id: string): T {
 }
 
 const stageEl = getEl<HTMLElement>('stage');
+const boardFrameEl = getEl<HTMLDivElement>('boardFrame');
 const boardEl = getEl<HTMLDivElement>('board');
 const scoreEl = getEl<HTMLSpanElement>('score');
 const toastEl = getEl<HTMLDivElement>('toast');
 const newGameBtn = getEl<HTMLButtonElement>('newGame');
 const helpBtn = getEl<HTMLButtonElement>('helpBtn');
 const settingsBtn = getEl<HTMLButtonElement>('settingsBtn');
+const turnBtn = getEl<HTMLButtonElement>('turnBtn');
 const settingsSheet = getEl<HTMLDialogElement>('settingsSheet');
 const helpSheet = getEl<HTMLDialogElement>('helpSheet');
 const sizeSeg = getEl<HTMLDivElement>('sizeSeg');
@@ -178,6 +182,48 @@ function reducedMotion(): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ---------------------------------------------------------------------------
+// Pose: the board is glued to the device. Turn the phone and the board turns
+// with it; gravity stays with the world. Manual turns add quarter turns.
+// ---------------------------------------------------------------------------
+
+const landscapeQuery = window.matchMedia('(orientation: landscape)');
+
+function deviceAngle(): number {
+  const angle = window.screen.orientation?.angle;
+  if (typeof angle === 'number') return angle;
+  return landscapeQuery.matches ? 90 : 0;
+}
+
+const pose: { rotation: Rotation; visualRotation: number } = { rotation: 0, visualRotation: 0 };
+
+function applyPose(): void {
+  const next = boardPose(deviceAngle(), settings.turns);
+  // Keep the CSS angle continuous so a turn always animates the short way round.
+  let delta = next.rotation - pose.rotation;
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  pose.visualRotation += delta;
+  pose.rotation = next.rotation;
+  boardEl.style.setProperty('--board-rotation', `${pose.visualRotation}deg`);
+  boardEl.style.setProperty('--turn-ms', `${config.timing.turn}ms`);
+  boardEl.dataset.rotation = String(pose.rotation);
+  engine.setGravity(next.gravity);
+  updateBoardSizing();
+}
+
+function turnBoard(): void {
+  settings.turns = (settings.turns + 1) % 4;
+  persistSettings();
+  applyPose();
+}
+
+if (window.screen.orientation?.addEventListener) {
+  window.screen.orientation.addEventListener('change', applyPose);
+} else {
+  landscapeQuery.addEventListener('change', applyPose);
 }
 
 // ---------------------------------------------------------------------------
@@ -283,11 +329,18 @@ function isAdjacent(a: Pos, b: Pos): boolean {
   return (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
 }
 
+// Board geometry in board-local pixels, refreshed by updateBoardSizing. Every
+// effect and animation offset is computed from these, never from client rects:
+// the board element is rotated, so a screen rect would be in the wrong frame.
+const layout = { cell: 48, gap: 4, pad: 17 };
+
 function updateBoardSizing(): void {
   const narrow = window.innerWidth <= 480;
   const boardPadding = (narrow ? 12 : 32) + 2; // padding both sides + 1px border each side
   const gap = narrow ? 2 : 4;
-  const totalGaps = (config.cols - 1) * gap;
+  const sideways = pose.rotation === 90 || pose.rotation === 270;
+  const screenCols = sideways ? config.rows : config.cols;
+  const screenRows = sideways ? config.cols : config.rows;
   const landscape = landscapePhoneQuery.matches;
 
   const stageStyle = getComputedStyle(stageEl);
@@ -299,11 +352,19 @@ function updateBoardSizing(): void {
     ? 0
     : backLinkEl.offsetHeight + topbarEl.offsetHeight + toolbarEl.offsetHeight + rowGap * 3;
 
-  const availWidth = Math.min(window.innerWidth - padX - railWidth, 560) - boardPadding - totalGaps;
-  const availHeight = window.innerHeight - padY - chromeHeight - boardPadding - totalGaps;
-  const avail = Math.min(availWidth, availHeight);
-  const cellSize = Math.max(18, Math.floor(avail / config.cols));
+  const availWidth = window.innerWidth - padX - railWidth - boardPadding - (screenCols - 1) * gap;
+  const availHeight = window.innerHeight - padY - chromeHeight - boardPadding - (screenRows - 1) * gap;
+  const cellSize = Math.max(12, Math.min(72, Math.floor(Math.min(availWidth / screenCols, availHeight / screenRows))));
   const gemSize = cellSize - (cellSize < 28 ? 4 : 6);
+
+  const boardW = boardPadding + config.cols * cellSize + (config.cols - 1) * gap;
+  const boardH = boardPadding + config.rows * cellSize + (config.rows - 1) * gap;
+  boardFrameEl.style.width = `${sideways ? boardH : boardW}px`;
+  boardFrameEl.style.height = `${sideways ? boardW : boardH}px`;
+
+  layout.cell = cellSize;
+  layout.gap = gap;
+  layout.pad = boardPadding / 2;
 
   boardEl.style.setProperty('--grid-cols', String(config.cols));
   boardEl.style.setProperty('--cell-size', `${cellSize}px`);
@@ -409,17 +470,14 @@ function ambientResponse(): void {
   ambientTimer = window.setTimeout(() => ambientEl.classList.remove('combo-response'), config.timing.ambient);
 }
 
-function cellCenter(r: number, c: number): { x: number; y: number } | null {
-  const cell = cells[posIdx(r, c)];
-  if (!cell) return null;
-  const rect = cell.getBoundingClientRect();
-  const boardRect = boardEl.getBoundingClientRect();
-  return { x: rect.left - boardRect.left + rect.width / 2, y: rect.top - boardRect.top + rect.height / 2 };
+// Centre of a cell in board-local pixels (inside the rotated board element).
+function cellCenter(r: number, c: number): { x: number; y: number } {
+  const step = layout.cell + layout.gap;
+  return { x: layout.pad + c * step + layout.cell / 2, y: layout.pad + r * step + layout.cell / 2 };
 }
 
 function showExplosionEffect(r: number, c: number): void {
   const center = cellCenter(r, c);
-  if (!center) return;
   const effect = document.createElement('div');
   effect.className = 'explosion-effect';
   effect.style.left = `${center.x}px`;
@@ -462,17 +520,18 @@ function pruneNestedBeams(beams: BeamEffect[]): BeamEffect[] {
   return [...kept.values()];
 }
 
-// Builds every surviving beam's element against one shared boardRect and cell
-// size, with no DOM write between reads, so a large fan-out forces one layout
-// instead of one per beam.
+// Builds every surviving beam's element from the shared board-local layout, with
+// no DOM write between reads, so a large fan-out forces one layout instead of
+// one per beam. The board's own size is its untransformed offset size: it is
+// rotated, so a client rect would measure the wrong box.
 function buildBeamElements(beams: BeamEffect[]): HTMLDivElement[] {
   const elements: HTMLDivElement[] = [];
-  const boardRect = boardEl.getBoundingClientRect();
-  const cellSize = parseFloat(getComputedStyle(boardEl).getPropertyValue('--cell-size')) || 48;
+  const boardWidth = boardEl.offsetWidth;
+  const boardHeight = boardEl.offsetHeight;
+  const cellSize = layout.cell;
   const half = cellSize / 2;
   for (const beam of pruneNestedBeams(beams)) {
     const center = cellCenter(beam.from.r, beam.from.c);
-    if (!center) continue;
     const el = document.createElement('div');
     el.className = `beam-effect ${beam.dir}`;
     switch (beam.dir) {
@@ -480,13 +539,13 @@ function buildBeamElements(beams: BeamEffect[]): HTMLDivElement[] {
         el.style.cssText = `left:${center.x - half}px;top:0;width:${cellSize}px;height:${center.y}px;`;
         break;
       case 'down':
-        el.style.cssText = `left:${center.x - half}px;top:${center.y}px;width:${cellSize}px;height:${boardRect.height - center.y}px;`;
+        el.style.cssText = `left:${center.x - half}px;top:${center.y}px;width:${cellSize}px;height:${boardHeight - center.y}px;`;
         break;
       case 'left':
         el.style.cssText = `left:0;top:${center.y - half}px;width:${center.x}px;height:${cellSize}px;`;
         break;
       case 'right':
-        el.style.cssText = `left:${center.x}px;top:${center.y - half}px;width:${boardRect.width - center.x}px;height:${cellSize}px;`;
+        el.style.cssText = `left:${center.x}px;top:${center.y - half}px;width:${boardWidth - center.x}px;height:${cellSize}px;`;
         break;
     }
     elements.push(el);
@@ -520,7 +579,6 @@ const MAX_PARTICLES = 20;
 function spawnParticles(r: number, c: number, color: string, count = 4): void {
   if (reducedMotion()) return;
   const center = cellCenter(r, c);
-  if (!center) return;
 
   for (let i = 0; i < count && activeParticles < MAX_PARTICLES; i++) {
     activeParticles++;
@@ -550,15 +608,6 @@ function applyRemovalAnimations(positions: Pos[], animations: Record<string, Rem
 // Frame playback
 // ---------------------------------------------------------------------------
 
-function cellStepY(): number {
-  if (config.rows > 1) {
-    const first = cells[0]?.getBoundingClientRect();
-    const next = cells[config.cols]?.getBoundingClientRect();
-    if (first && next) return next.top - first.top;
-  }
-  return cells[0]?.getBoundingClientRect().height || 48;
-}
-
 async function animateGemMoves(
   board: Board,
   moves: GemMove[],
@@ -572,23 +621,15 @@ async function animateGemMoves(
     return;
   }
 
-  const oldRects = moves.map(move =>
-    isInBounds(move.from) ? cells[posIdx(move.from.r, move.from.c)]?.getBoundingClientRect() || null : null
-  );
-
   renderBoard(board);
-  const stepY = cellStepY();
+  const step = layout.cell + layout.gap;
 
-  moves.forEach((move, index) => {
+  moves.forEach(move => {
     const gemEl = gems[posIdx(move.to.r, move.to.c)];
     if (!gemEl) return;
-    const newRect = cells[posIdx(move.to.r, move.to.c)].getBoundingClientRect();
-    const oldRect = oldRects[index];
-    const oldLeft = oldRect ? oldRect.left : newRect.left;
-    const oldTop = oldRect ? oldRect.top : newRect.top + (move.from.r - move.to.r) * stepY;
-    const dx = oldLeft - newRect.left;
-    const dy = oldTop - newRect.top;
-    if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) return;
+    const dx = (move.from.c - move.to.c) * step;
+    const dy = (move.from.r - move.to.r) * step;
+    if (dx === 0 && dy === 0) return;
     gemEl.classList.add('falling');
     gemEl.style.transform = `translate(${dx}px, ${dy}px)`;
     gemEl.style.transition = 'none';
@@ -623,24 +664,15 @@ async function animateShuffle(frame: Extract<Frame, { kind: 'shuffle' }>): Promi
     return;
   }
 
-  const oldRects = new Map<number, DOMRect>();
-  for (const move of frame.moves) {
-    const idx = posIdx(move.from.r, move.from.c);
-    const cell = cells[idx];
-    if (cell) oldRects.set(idx, cell.getBoundingClientRect());
-  }
-
   renderBoard(frame.board);
+  const step = layout.cell + layout.gap;
 
   for (const move of frame.moves) {
-    const newIdx = posIdx(move.to.r, move.to.c);
-    const gemEl = gems[newIdx];
-    const oldRect = oldRects.get(posIdx(move.from.r, move.from.c));
-    if (!gemEl || !oldRect) continue;
-    const newRect = cells[newIdx].getBoundingClientRect();
-    const dx = oldRect.left - newRect.left;
-    const dy = oldRect.top - newRect.top;
-    if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+    const gemEl = gems[posIdx(move.to.r, move.to.c)];
+    if (!gemEl) continue;
+    const dx = (move.from.c - move.to.c) * step;
+    const dy = (move.from.r - move.to.r) * step;
+    if (dx !== 0 || dy !== 0) {
       gemEl.style.transform = `translate(${dx}px, ${dy}px)`;
       gemEl.style.transition = 'none';
     }
@@ -1032,11 +1064,12 @@ boardEl.addEventListener('pointermove', (event: PointerEvent) => {
   const elapsed = performance.now() - pointerStart.time;
   if (distance < dragThreshold || elapsed < dragTimeGate || dragTriggered) return;
 
-  const horizontal = Math.abs(dx) > Math.abs(dy);
+  const delta = toBoardDelta(dx, dy, pose.rotation);
+  const alongRow = Math.abs(delta.dc) > Math.abs(delta.dr);
   const start = pointerStart.pos;
   const target: Pos = {
-    r: start.r + (horizontal ? 0 : dy > 0 ? 1 : -1),
-    c: start.c + (horizontal ? (dx > 0 ? 1 : -1) : 0)
+    r: start.r + (alongRow ? 0 : delta.dr > 0 ? 1 : -1),
+    c: start.c + (alongRow ? (delta.dc > 0 ? 1 : -1) : 0)
   };
   if (!isInBounds(target)) return;
 
@@ -1071,21 +1104,24 @@ boardEl.addEventListener('pointercancel', (event: PointerEvent) => {
   dragTriggered = false;
 });
 
-const arrowDeltas: Record<string, [number, number]> = {
-  ArrowUp: [-1, 0],
-  ArrowDown: [1, 0],
-  ArrowLeft: [0, -1],
-  ArrowRight: [0, 1]
+// Arrow keys move by what the player sees, so the screen delta is rotated into
+// board space exactly like a drag.
+const screenDelta: Record<string, [number, number]> = {
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0]
 };
 
 boardEl.addEventListener('keydown', (event: KeyboardEvent) => {
   const pos = cellFromEvent(event);
   if (!pos) return;
 
-  const delta = arrowDeltas[event.key];
-  if (delta) {
+  const screen = screenDelta[event.key];
+  if (screen) {
     event.preventDefault();
-    const next = { r: pos.r + delta[0], c: pos.c + delta[1] };
+    const d = toBoardDelta(screen[0], screen[1], pose.rotation);
+    const next = { r: pos.r + d.dr, c: pos.c + d.dc };
     if (!isInBounds(next)) return;
     cells[posIdx(pos.r, pos.c)].tabIndex = -1;
     const target = cells[posIdx(next.r, next.c)];
@@ -1229,6 +1265,15 @@ settingsBtn.addEventListener('click', () => {
 
 helpBtn.addEventListener('click', () => openSheet(helpSheet));
 
+turnBtn.addEventListener('click', turnBoard);
+document.addEventListener('keydown', event => {
+  if (event.key !== 'r' && event.key !== 'R') return;
+  if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+  if (document.querySelector('dialog[open]')) return;
+  event.preventDefault();
+  turnBoard();
+});
+
 // New Game is a hold, not a tap: a stray touch during a long cascade must not
 // throw the game away. The ring on the button fills over the hold.
 const hold = createHold({
@@ -1340,6 +1385,7 @@ function showFirstVisitTip(): void {
 
 applyPalette(settings.palette);
 createGrid();
+applyPose();
 if (!tryResume()) {
   void startNewGame({ transition: false });
 }
