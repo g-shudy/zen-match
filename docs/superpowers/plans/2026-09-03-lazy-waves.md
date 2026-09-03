@@ -52,7 +52,13 @@
 
 - [ ] **Step 1: Add the `play()` helper and switch every test to it**
 
-Tests consumed `result.frames` as an array. Add this helper directly after `makeCell` in `tests/engine.test.js`:
+Tests consumed `result.frames` as an array. First rewrite every `<name>.swap(` call in the file as `play(<name>, ` (do this before adding the helper, whose own body contains the one `engine.swap(` call that must survive):
+
+```bash
+sed -i '' -E 's/([A-Za-z0-9_]+)\.swap\(/play(\1, /g' tests/engine.test.js
+```
+
+Then add this helper directly after `makeCell`:
 
 ```js
 // The engine hands frames out lazily, one cascade wave at a time. Tests want the
@@ -64,15 +70,14 @@ function play(engine, pos1, pos2) {
 }
 ```
 
-Then rewrite every `<name>.swap(` call in the file as `play(<name>, `:
+Check the rewrite:
 
 ```bash
-sed -i '' -E 's/([A-Za-z0-9_]+)\.swap\(/play(\1, /g' tests/engine.test.js
 grep -c "play(" tests/engine.test.js
 grep -n "\.swap(" tests/engine.test.js
 ```
 
-Expected: the first grep counts the helper definition plus every former call (about 27); the second prints nothing. Calls such as `removeFrame(play(engine, { r: 2, c: 0 }, { r: 2, c: 1 }))` and `const result = play(engine, ...)` now hand the helpers an object whose `frames` is an array, so `placedSpecial`, `removeFrame` and the `JSON.stringify(make().frames)` determinism test keep working unchanged.
+Expected: the first grep counts the helper definition plus every former call (26); the second prints exactly one line, the helper's own `engine.swap(pos1, pos2)`. Calls such as `removeFrame(play(engine, { r: 2, c: 0 }, { r: 2, c: 1 }))` and `const result = play(engine, ...)` now hand the helpers an object whose `frames` is an array, so `placedSpecial`, `removeFrame` and the `JSON.stringify(make().frames)` determinism test keep working unchanged.
 
 - [ ] **Step 2: Replace the cap test and add the two lazy tests**
 
