@@ -46,10 +46,10 @@ The line gem becomes the general beam gem. A cell's `direction` field is replace
 type Special = null | 'bomb' | 'line' | 'rainbow' | 'propeller';
 // Arms is a 4-bit mask. UP = 1, RIGHT = 2, DOWN = 4, LEFT = 8. Board coordinates.
 type Arms = number;
-interface Cell { type: number; special: Special; arms?: Arms }
+interface Cell { type: number; special: Special; arms: Arms | null }
 ```
 
-`arms` is present only when `special === 'line'`. The identifier `line` is kept for continuity of CSS classes and saved games; the help sheet names the four variants by their glyph: Line, Corner, Tee, Cross.
+`arms` is non-null only when `special === 'line'`; it is explicitly `null` (not absent) on every other cell, which is what lets the validator reject arms on a non-line cell. The identifier `line` is kept for continuity of CSS classes and saved games; the help sheet names the four variants by their glyph: Line, Corner, Tee, Cross.
 
 ### Creation
 
@@ -271,7 +271,7 @@ When matched, caught in a blast, or swapped with another special, the propeller 
 |---|---|---|
 | `Cell.special` | `null / bomb / line / rainbow` | adds `propeller` |
 | `Cell.direction` | `horizontal / vertical / cross` | removed |
-| `Cell.arms` | absent | 4-bit mask on `line` cells |
+| `Cell.arms` | absent | `Arms \| null`: 4-bit mask on `line` cells, `null` on every other cell |
 | Saved game `v` | 1 | 2, with v1 migration |
 | Settings `gridSize` | number | replaced by `cols`, `rows`; adds `turns` |
 | Engine state | rows, cols, gemTypes, seed | adds `gravity` |

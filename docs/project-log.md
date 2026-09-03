@@ -76,5 +76,5 @@ Spec: `docs/superpowers/specs/2026-09-03-shapes-boards-cascades-design.md`, Part
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D17 | L, T and plus matches make a beam gem placed on the intersection, carrying a 4-bit arm mask; the straight-five line gem is the two-opposite-arms case. | Shapes had no identity (an L made the same bomb as a straight four) and the engine activated a `cross` direction nothing created. One arm model replaces three direction branches, and every combo is derived from `beamCells` instead of hand-written. |
+| D17 | L, T and plus matches make a beam gem placed on the intersection, carrying a 4-bit arm mask; the straight-five line gem is the two-opposite-arms case. `Cell.arms` is typed `Arms \| null` rather than the spec's optional `arms?: Arms`, since an explicit `null` on every non-line cell is what lets the validator reject arms on a cell that isn't a line gem. | Shapes had no identity (an L made the same bomb as a straight four) and the engine activated a `cross` direction nothing created. One arm model replaces three direction branches, and every combo is derived from `beamCells` instead of hand-written. |
 | D18 | Saved games are v2 and migrate v1 line directions to arm masks. | A game in progress should survive the upgrade; the validator still rejects any blob the engine could not run. |

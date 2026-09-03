@@ -31,7 +31,7 @@ Read the full [Design Philosophy](docs/zen-match-design-philosophy.md).
 
   Groups are counted by connected cells, not run length - two 3-matches that touch
   form a group of 6 and make a Rainbow. Swapping two specials together combines them:
-  two beam gems fire every arm either had (two lines make a cross), a bomb with a beam
+  two beam gems fire every arm either had (a horizontal and a vertical line make a cross), a bomb with a beam
   gem fires each beam three wide, and a rainbow with a beam gem gives every gem of that
   color the same beams.
 - **Chain reactions**: special gems caught in any explosion trigger automatically.
