@@ -865,6 +865,19 @@ button {
   to { transform: rotate(360deg); }
 }
 
+/* The gem that took off: its flying copy carries the visual. */
+.gem.flown {
+  opacity: 0;
+  transition: none;
+}
+
+.gem.flying {
+  position: absolute;
+  pointer-events: none;
+  z-index: 60;
+  will-change: transform;
+}
+
 /* 7. Effects -------------------------------------------------------------- */
 
 .explosion-effect {

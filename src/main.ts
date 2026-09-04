@@ -629,6 +629,59 @@ function showEffects(effects: Effect[]): void {
   }, 450);
 }
 
+type FlightEffect = Extract<Effect, { kind: 'flight' }>;
+
+function flightDuration(flight: FlightEffect): number {
+  const dist = Math.hypot(flight.to.r + 0.5 - flight.from.r, flight.to.c + 0.5 - flight.from.c);
+  return Math.min(900, 250 + 40 * dist);
+}
+
+// Sends a copy of each flying gem from its cell to the centre of its landing
+// block, all at once, and resolves after the longest flight. The originals go
+// out immediately. Under reduced motion nothing flies: the origin fades and the
+// landing pops at once.
+async function playFlights(effects: Effect[]): Promise<void> {
+  const flights = effects.filter((e): e is FlightEffect => e.kind === 'flight');
+  if (flights.length === 0) return;
+  for (const flight of flights) gems[posIdx(flight.from.r, flight.from.c)]?.classList.add('flown');
+  if (reducedMotion()) return;
+
+  const step = layout.cell + layout.gap;
+  const clones: Array<{ el: HTMLElement; dx: number; dy: number; ms: number }> = [];
+  for (const flight of flights) {
+    const source = gems[posIdx(flight.from.r, flight.from.c)];
+    if (!source) continue;
+    const el = source.cloneNode(true) as HTMLElement;
+    el.classList.remove('flown', 'selected', 'swap-target', 'touching');
+    el.classList.add('flying');
+    const from = cellCenter(flight.from.r, flight.from.c);
+    // Computed style is untransformed, which is what a rotated board needs.
+    const size = parseFloat(getComputedStyle(source).width) || layout.cell - 6;
+    el.style.left = `${from.x - size / 2}px`;
+    el.style.top = `${from.y - size / 2}px`;
+    el.style.transition = 'none';
+    el.style.transform = '';
+    clones.push({
+      el,
+      dx: (flight.to.c + 0.5 - flight.from.c) * step,
+      dy: (flight.to.r + 0.5 - flight.from.r) * step,
+      ms: flightDuration(flight)
+    });
+  }
+  const fragment = document.createDocumentFragment();
+  for (const c of clones) fragment.appendChild(c.el);
+  boardEl.appendChild(fragment);
+  void boardEl.offsetHeight;
+  let longest = 0;
+  for (const c of clones) {
+    c.el.style.transition = `transform ${c.ms}ms var(--ease)`;
+    c.el.style.transform = `translate(${c.dx}px, ${c.dy}px)`;
+    longest = Math.max(longest, c.ms);
+  }
+  await sleep(longest);
+  for (const c of clones) c.el.remove();
+}
+
 let activeParticles = 0;
 const MAX_PARTICLES = 20;
 
@@ -762,6 +815,8 @@ async function playSubSteps(subSteps: RemovalSubStep[], token: number, pace: num
     if (triggerGem) triggerGem.classList.add('activating');
     await sleep(config.timing.substepTrigger * pace);
 
+    await playFlights(step.effects);
+
     for (const pos of step.positions) {
       const gemEl = gems[posIdx(pos.r, pos.c)];
       if (gemEl) gemEl.classList.add(step.animations[`${pos.r},${pos.c}`] || 'matched');
@@ -833,6 +888,13 @@ async function playFrames(frames: Iterable<Frame>, token: number): Promise<void>
         if (frame.score.combo >= 3) boardGlow();
         if (frame.score.combo >= 5) ambientResponse();
 
+        // A propeller fired inside a chain sub-step pushes its flight into both
+        // the sub-step's effects and this frame's effects (same object). Identity
+        // separates the frame's own flights, which fly here, from sub-step
+        // flights, which `playSubSteps` flies as each sub-step fires.
+        const subStepEffects = new Set<Effect>(frame.subSteps?.flatMap(s => s.effects) ?? []);
+        const ownFlights = frame.effects.filter(e => !subStepEffects.has(e));
+
         if (frame.subSteps && frame.subSteps.length > 0) {
           const subStepKeys = new Set<string>();
           for (const step of frame.subSteps) {
@@ -841,10 +903,12 @@ async function playFrames(frames: Iterable<Frame>, token: number): Promise<void>
           // Only the directly matched gems animate now; chain-reaction victims
           // animate when their sub-step fires.
           const initialPositions = frame.positions.filter(pos => !subStepKeys.has(`${pos.r},${pos.c}`));
+          await playFlights(ownFlights);
           applyRemovalAnimations(initialPositions, frame.animations);
           await sleep(config.timing.substepClear * pace);
           await playSubSteps(frame.subSteps, token, pace);
         } else {
+          await playFlights(ownFlights);
           applyRemovalAnimations(frame.positions, frame.animations);
           showEffects(frame.effects);
           await sleep(config.timing.remove * pace);
