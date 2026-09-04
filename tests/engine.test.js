@@ -970,6 +970,26 @@ test('A matched propeller flies to a landing outside the clearing and pops a 2x2
   assert.deepEqual(frame.subSteps[0].triggerPos, { r: 1, c: 1 });
 });
 
+test('A chained propeller pushes the same flight object into frame.effects and its sub-step', () => {
+  // Same fixture as above: the propeller fires from inside a sub-step, not as
+  // one of the frame's own effects. The page tells the two apart by object
+  // identity (`ownFlights` in main.ts), so that identity is the contract this
+  // pins: a structurally-equal clone in either array would silently fly twice.
+  const board = cyclicBoard();
+  board[0][1] = makeCell(0);
+  board[1][1] = makeCell(0, SPECIAL.PROPELLER);
+  board[2][0] = makeCell(0);
+
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 42 });
+  engine.setBoard(board);
+  const frame = removeFrame(play(engine, { r: 2, c: 0 }, { r: 2, c: 1 }));
+
+  assert.equal(frame.subSteps.length, 1);
+  const subStepFlight = frame.subSteps[0].effects.find(e => e.kind === 'flight');
+  assert.ok(subStepFlight, "the sub-step carries the propeller's flight");
+  assert.ok(frame.effects.includes(subStepFlight), "frame.effects holds the identical object, not a copy");
+});
+
 test('Propeller + bomb carries the bomb to the landing', () => {
   const board = cyclicBoard();
   board[2][2] = makeCell(2, SPECIAL.PROPELLER);

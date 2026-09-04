@@ -656,11 +656,14 @@ async function playFlights(effects: Effect[]): Promise<void> {
     el.classList.add('flying');
     const from = cellCenter(flight.from.r, flight.from.c);
     // Computed style is untransformed, which is what a rotated board needs.
-    const size = parseFloat(getComputedStyle(source).width) || layout.cell - 6;
+    const size = parseFloat(getComputedStyle(source).width) || source.offsetWidth;
     el.style.left = `${from.x - size / 2}px`;
     el.style.top = `${from.y - size / 2}px`;
     el.style.transition = 'none';
     el.style.transform = '';
+    // A retained-fill animation (reform, just-created) outranks the inline
+    // transform and would pin the clone at the origin for the whole flight.
+    el.style.animation = 'none';
     clones.push({
       el,
       dx: (flight.to.c + 0.5 - flight.from.c) * step,
@@ -816,6 +819,7 @@ async function playSubSteps(subSteps: RemovalSubStep[], token: number, pace: num
     await sleep(config.timing.substepTrigger * pace);
 
     await playFlights(step.effects);
+    if (token !== gameState.runToken) return;
 
     for (const pos of step.positions) {
       const gemEl = gems[posIdx(pos.r, pos.c)];
@@ -891,9 +895,14 @@ async function playFrames(frames: Iterable<Frame>, token: number): Promise<void>
         // A propeller fired inside a chain sub-step pushes its flight into both
         // the sub-step's effects and this frame's effects (same object). Identity
         // separates the frame's own flights, which fly here, from sub-step
-        // flights, which `playSubSteps` flies as each sub-step fires.
-        const subStepEffects = new Set<Effect>(frame.subSteps?.flatMap(s => s.effects) ?? []);
-        const ownFlights = frame.effects.filter(e => !subStepEffects.has(e));
+        // flights, which `playSubSteps` flies as each sub-step fires. Most
+        // removal frames carry no flight at all, so the identity set is only
+        // worth building when one is actually present.
+        let ownFlights: Effect[] = [];
+        if (frame.effects.some(e => e.kind === 'flight')) {
+          const subStepEffects = new Set<Effect>(frame.subSteps?.flatMap(s => s.effects) ?? []);
+          ownFlights = frame.effects.filter(e => !subStepEffects.has(e));
+        }
 
         if (frame.subSteps && frame.subSteps.length > 0) {
           const subStepKeys = new Set<string>();
@@ -904,11 +913,13 @@ async function playFrames(frames: Iterable<Frame>, token: number): Promise<void>
           // animate when their sub-step fires.
           const initialPositions = frame.positions.filter(pos => !subStepKeys.has(`${pos.r},${pos.c}`));
           await playFlights(ownFlights);
+          if (token !== gameState.runToken) return;
           applyRemovalAnimations(initialPositions, frame.animations);
           await sleep(config.timing.substepClear * pace);
           await playSubSteps(frame.subSteps, token, pace);
         } else {
           await playFlights(ownFlights);
+          if (token !== gameState.runToken) return;
           applyRemovalAnimations(frame.positions, frame.animations);
           showEffects(frame.effects);
           await sleep(config.timing.remove * pace);

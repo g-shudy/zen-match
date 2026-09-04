@@ -1452,6 +1452,13 @@ button {
     transition-duration: 0.01s;
   }
 
+  /* No clone flies under reduced motion, so the origin itself is the only
+     thing that shows the propeller left: fade it instead of the instant
+     hide the normal-motion rule uses. */
+  .gem.flown {
+    transition: opacity 0.2s var(--ease);
+  }
+
   .gem.special-bomb::after,
   .gem.special-line::after,
   .gem.special-rainbow::before,
