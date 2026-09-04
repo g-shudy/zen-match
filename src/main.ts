@@ -652,7 +652,7 @@ async function playFlights(effects: Effect[]): Promise<void> {
     const source = gems[posIdx(flight.from.r, flight.from.c)];
     if (!source) continue;
     const el = source.cloneNode(true) as HTMLElement;
-    el.classList.remove('flown', 'selected', 'swap-target', 'touching');
+    el.classList.remove('flown', 'selected', 'swap-target', 'touching', 'activating');
     el.classList.add('flying');
     const from = cellCenter(flight.from.r, flight.from.c);
     // Computed style is untransformed, which is what a rotated board needs.
@@ -818,10 +818,17 @@ async function playSubSteps(subSteps: RemovalSubStep[], token: number, pace: num
     if (triggerGem) triggerGem.classList.add('activating');
     await sleep(config.timing.substepTrigger * pace);
 
+    // `playFlights` writes `.flown` to the origin gems, so supersession has to be
+    // caught before it, not after: under reduced motion a new board renders with
+    // no dissolve to rewrite a stale class, and `.gem.flown` holds at opacity 0.
+    // A superseded step still tidies the trigger gem, at both checks: otherwise a
+    // fresh board could inherit `activating`'s z-index on a gem it never touched.
+    if (token !== gameState.runToken) {
+      if (triggerGem) triggerGem.classList.remove('activating');
+      return;
+    }
     await playFlights(step.effects);
     if (token !== gameState.runToken) {
-      // A superseded step still tidies the trigger gem: otherwise a fresh board
-      // could inherit `activating`'s z-index on a gem it never touched.
       if (triggerGem) triggerGem.classList.remove('activating');
       return;
     }
@@ -897,18 +904,24 @@ async function playFrames(frames: Iterable<Frame>, token: number): Promise<void>
         if (frame.score.combo >= 3) boardGlow();
         if (frame.score.combo >= 5) ambientResponse();
 
-        // A propeller fired inside a chain sub-step pushes its flight into both
-        // the sub-step's effects and this frame's effects (same object). Identity
-        // separates the frame's own flights, which fly here, from sub-step
-        // flights, which `playSubSteps` flies as each sub-step fires. Most
-        // removal frames carry no flight at all, so the identity set is only
-        // worth building when one is actually present.
-        let ownFlights: Effect[] = [];
-        if (frame.effects.some(e => e.kind === 'flight')) {
-          const subStepEffects = new Set<Effect>(frame.subSteps?.flatMap(s => s.effects) ?? []);
-          ownFlights = frame.effects.filter(e => !subStepEffects.has(e));
+        // Every effect a sub-step fires is also pushed into this frame's effects,
+        // as the same object. Identity separates the frame's own effects - the
+        // ones the match itself fired, including a carried bomb's blast at a
+        // propeller's landing - from sub-step effects, which `playSubSteps` plays
+        // as each sub-step fires. A frame with no sub-steps owns all of its
+        // effects, so the set is only worth building when one could hold them.
+        let ownEffects: Effect[] = frame.effects;
+        if (frame.subSteps && frame.subSteps.length > 0 && frame.effects.length > 0) {
+          const subStepEffects = new Set<Effect>(frame.subSteps.flatMap(s => s.effects));
+          ownEffects = frame.effects.filter(e => !subStepEffects.has(e));
         }
 
+        // Both branches check the token immediately above their flight as well as
+        // below it: `playFlights` writes `.flown` to the origin gems before it
+        // awaits, so the guard belongs above that write, not merely above the
+        // removal classes that follow. Nothing is awaited between here and the
+        // frame-top check today; the local guards keep that from being
+        // load-bearing.
         if (frame.subSteps && frame.subSteps.length > 0) {
           const subStepKeys = new Set<string>();
           for (const step of frame.subSteps) {
@@ -917,16 +930,19 @@ async function playFrames(frames: Iterable<Frame>, token: number): Promise<void>
           // Only the directly matched gems animate now; chain-reaction victims
           // animate when their sub-step fires.
           const initialPositions = frame.positions.filter(pos => !subStepKeys.has(`${pos.r},${pos.c}`));
-          await playFlights(ownFlights);
+          if (token !== gameState.runToken) return;
+          await playFlights(ownEffects);
           if (token !== gameState.runToken) return;
           applyRemovalAnimations(initialPositions, frame.animations);
+          showEffects(ownEffects);
           await sleep(config.timing.substepClear * pace);
           await playSubSteps(frame.subSteps, token, pace);
         } else {
-          await playFlights(ownFlights);
+          if (token !== gameState.runToken) return;
+          await playFlights(ownEffects);
           if (token !== gameState.runToken) return;
           applyRemovalAnimations(frame.positions, frame.animations);
-          showEffects(frame.effects);
+          showEffects(ownEffects);
           await sleep(config.timing.remove * pace);
         }
         break;

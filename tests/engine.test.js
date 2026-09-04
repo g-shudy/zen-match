@@ -1243,3 +1243,52 @@ test('A bomb in the rainbow flock flies instead of detonating', () => {
   assert.equal(frame.animations['0,0'], 'flown', 'not overwritten by its own blast');
   assert.equal(frame.effects.filter(e => e.kind === 'explosion' && e.r === 0 && e.c === 0).length, 0, 'it never detonates where it stood');
 });
+
+test('A rainbow flock at 16x16 gives every gem of its colour exactly one flight', () => {
+  // The other flock tests run on a 4x4, which is small enough that no landing
+  // anchor is ever free and the fallback carries every flight. This pins the
+  // `processed` invariant at a size the settings sheet actually offers: 128
+  // propellers taking off at once, each from its own cell and no cell twice.
+  const rows = 16;
+  const cols = 16;
+  // Two colours in a checkerboard: no run of three, and every 2x2 holds both
+  // colours, so the fixture starts with nothing matched.
+  const board = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => makeCell((r + c) % 2))
+  );
+  // Same colours the cells already carry, so the fixture stays match-free.
+  board[8][8] = makeCell(0, SPECIAL.RAINBOW);
+  board[8][9] = makeCell(1, SPECIAL.PROPELLER);
+  assert.equal(findMatches(board, rows, cols).length, 0, 'fixture must start match-free');
+
+  const engine = new Engine({ rows, cols, gemTypes: 2, seed: 20260903 });
+  engine.setBoard(board);
+  const result = engine.swap({ r: 8, c: 8 }, { r: 8, c: 9 });
+  // Pulled lazily and dropped after the first wave: a two-colour 16x16 cascades
+  // for hundreds of waves after a flock this size, and the flock is all that is
+  // under test.
+  let frame = null;
+  for (const f of result.frames) {
+    if (f.kind === 'remove') { frame = f; break; }
+  }
+  assert.ok(frame, 'expected a remove frame');
+
+  // After the swap the propeller sits at (8,8) and the rainbow at (8,9), so the
+  // flock is every colour-1 cell of the checkerboard with those two exchanged.
+  const expected = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (r === 8 && c === 9) continue;
+      if ((r === 8 && c === 8) || (r + c) % 2 === 1) expected.push({ r, c });
+    }
+  }
+  assert.equal(expected.length, 128, 'half the board is the flock colour');
+
+  const flights = flightsOf(frame);
+  const froms = keys(flights.map(f => f.from));
+  assert.equal(flights.length, expected.length, 'one flight per gem of the flock colour');
+  assert.equal(new Set(froms).size, flights.length, 'no cell takes off twice');
+  assert.deepEqual(froms, keys(expected), 'every gem of the colour flies, and nothing else does');
+  assert.ok(!froms.includes('8,9'), 'the rainbow is consumed, not launched');
+  for (const from of froms) assert.equal(frame.animations[from], 'flown', 'each origin is marked flown');
+});

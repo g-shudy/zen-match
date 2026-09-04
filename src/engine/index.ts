@@ -1007,8 +1007,12 @@ function activateSpecialsInRemovalSet(
 
       if (gem.special === SPECIAL.BOMB) {
         chainCount++;
-        stepEffects.push({ kind: 'explosion', r, c });
-        effects.push({ kind: 'explosion', r, c });
+        // One object in both arrays, as the beam and flight branches do. The page
+        // separates a frame's own effects from its sub-steps' by identity, and two
+        // equal-but-distinct objects would make this blast draw twice.
+        const blast: Effect = { kind: 'explosion', r, c };
+        stepEffects.push(blast);
+        effects.push(blast);
 
         for (let dr = -1; dr <= 1; dr++) {
           for (let dc = -1; dc <= 1; dc++) {

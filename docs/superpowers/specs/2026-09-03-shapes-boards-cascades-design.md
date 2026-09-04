@@ -233,7 +233,7 @@ The orientation API's angle sign and the primary/secondary mapping differ across
 
 ### Placement
 
-The propeller is placed on the swapped cell when it lies in the square, otherwise on the square cell nearest the group's centroid.
+The propeller is placed on the swapped cell when it lies in the square, otherwise on the square cell nearest the group's centroid. The centroid is measured over the square's own four cells, not the whole merged group, so all four are equidistant and the anchor (top-left) wins every tie: a cascade-made propeller always lands there, and only a swap places it elsewhere.
 
 ### Propeller
 
