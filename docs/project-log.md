@@ -100,3 +100,13 @@ Spec: `docs/superpowers/specs/2026-09-03-shapes-boards-cascades-design.md`, Part
 | D24 | The pose comes from `screen.orientation.angle` plus manual turns through one pure function with a 16-case truth table; the sign is confirmed on an iPhone before release. | Platforms disagree on the API's sign; a single place to correct. |
 | D25 | Effects, falls and drags are computed in board-local coordinates from cell indices. | A translate applied inside a rotated element is rotated with it; client rects lie. |
 | D26 | Sides go to 40 by URL and 24 in the sheet; the render diffs. | Big boards are for tablets and desktops; the toy still works small. |
+
+## 2.4 The propeller (2026-09-03)
+
+Spec: `docs/superpowers/specs/2026-09-03-shapes-boards-cascades-design.md`, Part D.
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| D27 | A 2x2 of one colour is a match; its cells join the matcher's map so a square touching a run floods into one group, and precedence is rainbow, beam, propeller, line, bomb. | The 2x2 had no identity; the group model already existed, so the square is one more way to mark cells. |
+| D28 | The propeller flies to an anchor drawn from the seeded generator among blocks not already being cleared, and pops the 2x2 there. | A gem that travels is spectacle to watch, and a seeded landing keeps `?seed=` boards reproducible. |
+| D29 | Combos derive from one launch helper: two propellers both fly, a carried bomb or beam fires at the landing, a rainbow sends the whole colour flying. | The rainbow pattern from 2.1 (rainbow + X turns the colour into X) extended once more. |

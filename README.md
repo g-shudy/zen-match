@@ -29,12 +29,13 @@ Read the full [Design Philosophy](docs/zen-match-design-philosophy.md).
   - **Line**: a straight 5 - fires a beam each way along its line, to the edge
   - **Corner**, **Tee**, **Cross**: an L, T or plus of 5 - one beam along each leg, from the cell where the legs meet
   - **Rainbow**: any connected group of 6+ - clears every gem of one color when swapped
+  - **Propeller**: a 2x2 block of one color - lifts away, lands somewhere else, and pops a 2x2 there
 
   Groups are counted by connected cells, not run length - two 3-matches that touch
   form a group of 6 and make a Rainbow. Swapping two specials together combines them:
   two beam gems fire every arm either had (a horizontal and a vertical line make a cross), a bomb with a beam
   gem fires each beam three wide, and a rainbow with a beam gem gives every gem of that
-  color the same beams.
+  color the same beams. A propeller carries a bomb or a beam gem to where it lands, two propellers both fly, and a rainbow with a propeller sends every gem of that color flying.
 - **Chain reactions**: special gems caught in any explosion trigger automatically.
 - **No way to lose**: if the board runs out of moves it reshuffles itself.
 - **New Game is a hold**: press and keep pressing for a second, and a ring fills around the button. A stray tap never ends a game. Settings has a plain *Start new game* as well.

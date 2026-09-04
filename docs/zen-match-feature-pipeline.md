@@ -260,6 +260,14 @@ CSS variable color schemes that rotate by season. Spring pastels, summer brights
 
 **Why deferred:** Nice-to-have polish, not core experience enhancement.
 
+### 5.4 Carried over from the 2026-09-03 spec (2.1 to 2.4)
+
+- **Nova tier.** Groups of 9 or more at two or three colours all make one rainbow; a tier that turns a whole colour into bombs would make low-colour boards visibly different.
+- **Board masks.** Holes, a diamond, a circle. Needs per-column refill paths.
+- **Bloom refill.** Cleared gems regrow in place instead of falling. Cheap, but it removes the fall the philosophy names as the gift.
+- **Tilt gravity.** `DeviceOrientationEvent` would let the board obey real tilt at any angle. Permission prompt and standalone-mode reliability keep it out.
+- **Hex toy.** A sibling project, not a mode of this one.
+
 ---
 
 ## Evaluation Criteria
