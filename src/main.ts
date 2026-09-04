@@ -819,7 +819,12 @@ async function playSubSteps(subSteps: RemovalSubStep[], token: number, pace: num
     await sleep(config.timing.substepTrigger * pace);
 
     await playFlights(step.effects);
-    if (token !== gameState.runToken) return;
+    if (token !== gameState.runToken) {
+      // A superseded step still tidies the trigger gem: otherwise a fresh board
+      // could inherit `activating`'s z-index on a gem it never touched.
+      if (triggerGem) triggerGem.classList.remove('activating');
+      return;
+    }
 
     for (const pos of step.positions) {
       const gemEl = gems[posIdx(pos.r, pos.c)];
@@ -1556,7 +1561,10 @@ function scheduleSizing(): void {
   if (resizeRaf) return;
   resizeRaf = requestAnimationFrame(() => {
     resizeRaf = 0;
-    updateBoardSizing();
+    // A device rotation fires `resize` alongside `screen.orientation`'s `change`,
+    // so a re-measure landing mid-turn must ease with it rather than snap the
+    // frame to its instant size.
+    updateBoardSizing({ animate: boardFrameEl.classList.contains('turning') });
   });
 }
 

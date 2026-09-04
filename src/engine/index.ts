@@ -524,7 +524,7 @@ export class Engine {
           const colorPositions: Pos[] = [];
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
-              if (board[r][c]?.type === targetType) {
+              if (keyFor(r, c) !== rainbowPos && board[r][c]?.type === targetType) {
                 colorPositions.push({ r, c });
               }
             }
@@ -553,7 +553,7 @@ export class Engine {
 
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
-              if (board[r][c]?.type !== targetType) continue;
+              if (keyFor(r, c) === rainbowPos || board[r][c]?.type !== targetType) continue;
               const beam = beamCells({ r, c }, arms, rows, cols);
               claimCells(toRemove, animationClasses, beam.cells, 'line-cleared');
               effects.push(...beam.effects);

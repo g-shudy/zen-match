@@ -691,6 +691,41 @@ test('Beam + rainbow gives every gem of the partner colour the same arms', () =>
   }
 });
 
+test("A rainbow sharing the bomb's colour never fires an explosion at its own cell", () => {
+  // The rainbow + bomb scan used to include the rainbow's own cell when its type
+  // matched the bomb's, firing a spurious explosion effect there (the cell is
+  // still consumed as a rainbow either way; only the effect was wrong).
+  const board = cyclicBoard();
+  board[2][2] = makeCell(2, SPECIAL.RAINBOW);
+  board[2][3] = makeCell(2, SPECIAL.BOMB);
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  engine.setBoard(board);
+
+  const frame = removeFrame(play(engine, { r: 2, c: 2 }, { r: 2, c: 3 }));
+
+  // After the swap the rainbow sits where the bomb started.
+  const explosions = frame.effects.filter(e => e.kind === 'explosion');
+  assert.ok(!explosions.some(e => e.r === 2 && e.c === 3), 'no explosion fires at the rainbow cell');
+  assert.equal(frame.animations['2,3'], 'rainbow-cleared');
+});
+
+test("A rainbow sharing the line gem's colour never fires a beam from its own cell", () => {
+  // Same bug, the line branch: the scan used to fire a beam centred on the
+  // rainbow's own cell when the line gem shared its colour.
+  const board = cyclicBoard();
+  board[2][2] = makeCell(2, SPECIAL.RAINBOW);
+  board[2][3] = makeCell(2, SPECIAL.LINE, ARMS_HORIZONTAL);
+  const engine = new Engine({ rows: 5, cols: 5, gemTypes: 4, seed: 3 });
+  engine.setBoard(board);
+
+  const frame = removeFrame(play(engine, { r: 2, c: 2 }, { r: 2, c: 3 }));
+
+  // After the swap the rainbow sits where the line gem started.
+  const beams = frame.effects.filter(e => e.kind === 'beam');
+  assert.ok(!beams.some(b => b.from.r === 2 && b.from.c === 3), 'no beam fires from the rainbow cell');
+  assert.equal(frame.animations['2,3'], 'rainbow-cleared');
+});
+
 test('Every combo consumes both swapped specials', () => {
   const board = cyclicBoard();
   board[2][2] = makeCell(2, SPECIAL.LINE, ARM.UP);
